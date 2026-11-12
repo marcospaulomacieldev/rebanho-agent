@@ -32,5 +32,12 @@ Docker entra no final.
 - Decisões de arquitetura novas viram um ADR em `docs/adr/`.
 - O dono do projeto está aprendendo: explicar o porquê das decisões e cada termo técnico novo.
 
+## Fluxo com IA
+- Modelos: Sonnet executa; Opus é o advisor nos pontos de decisão (`.claude/settings.json`).
+- Buscas no repositório: delegar ao subagente `explorador` (Haiku, somente leitura).
+- Nova ferramenta do agente: seguir a skill `/nova-ferramenta`.
+- Antes de cada commit: `/revisar` (subagente `revisor`).
+- Trocar de tarefa: `/clear`. Tarefa longa que continua: `/compact`.
+
 ## Fora do escopo (por enquanto)
 Autenticação, front-end, escrita no banco, RAG.
