@@ -28,6 +28,7 @@ Produtor ou gestor de uma fazenda leiteira de pequeno e médio porte.
 ## 4. Modelo de dados (proposta inicial)
 - `animais(id, brinco, nome, raca, data_nascimento, lote, status)`
 - `producao_leite(id, animal_id, data, litros_manha, litros_tarde)`
+à primeira vista considerando a limitação do mvp isso ja é suficieente
 
 > Marcos: revise isso com sua vivência. Que informações um produtor realmente consulta?
 > (por exemplo: dias em lactação, ordens de parto, ordenhas por dia)
