@@ -1,6 +1,11 @@
 # Segredos
 .env
 
+# Notas e instruções pessoais (nunca versionar)
+notas-privadas/
+CLAUDE.local.md
+.claude/settings.local.json
+
 # Python
 __pycache__/
 *.pyc
