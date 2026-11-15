@@ -1,0 +1,18 @@
+[
+  {
+    "id": "producao-rebanho-7-dias",
+    "pergunta": "Qual foi a produção total do rebanho nos últimos 7 dias?",
+    "semente": 42,
+    "ferramenta_esperada": "producao_por_periodo",
+    "argumentos_esperados": {"dias": 7},
+    "valor_esperado": {"litros_total": 4479.1, "dias_com_registro": 7}
+  },
+  {
+    "id": "producao-rebanho-30-dias",
+    "pergunta": "Quanto leite o rebanho produziu nos últimos 30 dias?",
+    "semente": 42,
+    "ferramenta_esperada": "producao_por_periodo",
+    "argumentos_esperados": {"dias": 30},
+    "valor_esperado": {"litros_total": 19639.6, "dias_com_registro": 30}
+  }
+]

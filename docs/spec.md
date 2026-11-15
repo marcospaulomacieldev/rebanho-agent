@@ -52,6 +52,12 @@ Produtor ou gestor de uma fazenda leiteira de pequeno e médio porte.
   `status = 'lactacao'`. Os campos `litros_media_dia_total_rebanho` (total do rebanho, em
   centenas de litros) e `litros_media_dia_por_animal` (média por animal, em dezenas de
   litros) têm nomes diferentes de propósito, para não serem confundidos.
+- **Arredondamento:** `litros_total` sai com 1 casa decimal e as médias com 2, para não
+  aparecerem restos de soma de decimais (como `123.00000000001`).
+- **Argumentos numéricos:** a ferramenta aceita número inteiro ou decimal de valor inteiro
+  (`7.0`, que alguns modelos enviam) e recusa o resto com erro claro, inclusive inteiros
+  maiores que o SQLite aceita (acima de 2^63 - 1). `animal_id` nulo equivale a omitido
+  (rebanho inteiro).
 - **Animais inativos:** `resumo_rebanho` e `animais_abaixo_da_media` consideram só
   `ativo = 1`. `listar_animais` também, a menos que `incluir_inativos` seja verdadeiro.
   `producao_por_periodo` do rebanho inclui o histórico de quem saiu dentro da janela (o

@@ -50,7 +50,23 @@ Serve de memória do projeto: decisões, erros e aprendizados.
   conferidas à mão, nenhuma quebra). `--forcar` só apaga arquivo que seja um banco SQLite
   (cabeçalho conferido), a geração roda antes de apagar o banco antigo, e `Dados` guarda
   tuplas. 172 testes passando.
-- Pendente: as duas ferramentas de leite, cliente do LLM, laço do agente e a entrega de
-  domingo (pergunta em linguagem natural pela linha de comando). Antes do Docker: incluir
-  `schema.sql` como `package-data` no `pyproject.toml`, senão o arquivo não vai na
+- Primeira ferramenta, `producao_por_periodo` (janela em `dias`): consulta em
+  `app/db/producao.py`, função em `app/tools/producao.py`, registro neutro em
+  `app/tools/registro.py` (descrição das ferramentas no registro, prompt de sistema em
+  `prompts/`), 2 casos de eval em `evals/casos/producao_por_periodo.json` e testes com banco
+  escrito à mão e cruzamento com um cálculo independente sobre os dados do gerador. 218
+  testes passando. Limite conhecido: só aceita janela relativa em `dias` e `animal_id`; ainda
+  não responde "produção da mimosa em 21/10". A proposta para isso (datas, busca por nome e
+  regras do agente) está no rascunho `docs/adr/0005-periodo-das-consultas-de-producao.md`,
+  com status `proposta`: nada foi aplicado na spec nem no código.
+- A revisão da ferramenta reprovou a primeira versão: `animal_id` gigante levantava
+  `OverflowError` em vez de `ValueError`. Corrigido com teste, junto com `argumentos` nulos
+  ou malformados no registro, `animal_id` nulo documentado como "rebanho inteiro" e um teste
+  de cruzamento que também compara a média. 241 testes passando.
+- Lembrete: a descrição de `producao_por_periodo` cita "outra ferramenta" e diz que ainda não
+  há como achar um animal pelo nome; revisar esse texto quando `animais_abaixo_da_media` e
+  `listar_animais` existirem.
+- Pendente: `animais_abaixo_da_media`, cliente do LLM, laço do agente, prompt de sistema e a
+  entrega de domingo (pergunta em linguagem natural pela linha de comando). Antes do Docker:
+  incluir `schema.sql` como `package-data` no `pyproject.toml`, senão o arquivo não vai na
   instalação não editável.
