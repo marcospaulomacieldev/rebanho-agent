@@ -13,6 +13,8 @@ gratuito do Gemini os dados enviados podem ser usados para melhorar produtos do 
   com um modelo da família Flash. O modelo exato fica em configuração, não no código.
 - Todo acesso ao modelo passa por uma interface própria (`app/llm/client.py`); o provedor
   é escolhido pela variável `LLM_PROVIDER`.
+- O SDK é o pacote **`google-genai`**, usado só dentro de `app/llm/client.py`. O pacote
+  antigo, `google-generativeai`, está descontinuado.
 - O projeto usa **apenas dados sintéticos**, o que elimina o risco de privacidade do plano gratuito.
 - Ao final, as evals também serão rodadas em um modelo do Claude, e a comparação será publicada no README.
 
