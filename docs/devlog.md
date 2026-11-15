@@ -36,7 +36,21 @@ Serve de memória do projeto: decisões, erros e aprendizados.
   nas pontas, testes da matriz completa de status x lote (32 combinações, 10 válidas) e das
   duas barreiras de somente leitura, e nomes distintos para as duas médias de rebanho na
   spec (`litros_media_dia_total_rebanho` e `litros_media_dia_por_animal`).
-- Pendente: terceira revisão, commits (docs; dependência; schema), gerador de dados, as duas
-  ferramentas de leite, cliente do LLM, laço do agente e a entrega de domingo (pergunta em
-  linguagem natural pela linha de comando). Antes do Docker: incluir `schema.sql` como
-  `package-data` no `pyproject.toml`, senão o arquivo não vai na instalação não editável.
+- Commits feitos: docs, dependência `google-genai` e schema com conexão somente leitura.
+- Gerador de dados (`app/db/seed.py`, `scripts/seed_data.py`, `tests/test_seed.py`): 60
+  animais (55 ativos), 90 dias (2026-08-18 a 2026-11-15), 3119 registros de produção, 87
+  partos e semente fixa 42. A função `gerar_dados` é pura (só gera) e `gravar_dados` grava;
+  `gerar_banco` recusa sobrescrever sem `--forcar`. Média das vacas em lactação: 20,1 L/dia.
+  As 4 vacas de baixa produção (12,6 a 13,0 L/dia; a quinta pior tem 15,4) são as 4 piores,
+  e uma delas tem o nome em forma de instrução, para a eval de prompt injection. Sem curva
+  de lactação e sem efeito do clima, de propósito.
+- A revisão do gerador aprovou com ajustes, todos aplicados: a garantia das 4 piores só
+  valia para a semente 42 (quebrava em 2 de 40 sementes); agora o piso das vacas normais é
+  15,5 L e o teto das de baixa produção é 13,2 L, e um teste cobre 40 sementes (500
+  conferidas à mão, nenhuma quebra). `--forcar` só apaga arquivo que seja um banco SQLite
+  (cabeçalho conferido), a geração roda antes de apagar o banco antigo, e `Dados` guarda
+  tuplas. 172 testes passando.
+- Pendente: as duas ferramentas de leite, cliente do LLM, laço do agente e a entrega de
+  domingo (pergunta em linguagem natural pela linha de comando). Antes do Docker: incluir
+  `schema.sql` como `package-data` no `pyproject.toml`, senão o arquivo não vai na
+  instalação não editável.
