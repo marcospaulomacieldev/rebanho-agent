@@ -66,7 +66,51 @@ Serve de memória do projeto: decisões, erros e aprendizados.
 - Lembrete: a descrição de `producao_por_periodo` cita "outra ferramenta" e diz que ainda não
   há como achar um animal pelo nome; revisar esse texto quando `animais_abaixo_da_media` e
   `listar_animais` existirem.
-- Pendente: `animais_abaixo_da_media`, cliente do LLM, laço do agente, prompt de sistema e a
-  entrega de domingo (pergunta em linguagem natural pela linha de comando). Antes do Docker:
-  incluir `schema.sql` como `package-data` no `pyproject.toml`, senão o arquivo não vai na
-  instalação não editável.
+- Prazo estendido para segunda. Domingo: caminho completo com a ferramenta que já existe.
+  Feito: cliente do LLM (`app/llm/client.py`, interface `ClienteLLM`, `ClienteGemini` com
+  chamada manual de ferramentas e devolução da mensagem original do provedor, e
+  `cliente_do_ambiente` com `LLM_PROVIDER`, `LLM_MODEL` e `GEMINI_API_KEY`), laço do agente
+  (`app/agente.py`, limite de 5 passos, erro de ferramenta devolvido ao modelo como texto,
+  pergunta limitada a 1000 letras), prompt de sistema (`prompts/sistema.md`) e linha de
+  comando (`python -m app.ask "pergunta"`). Só `client.py` importa o SDK, e um teste garante
+  isso. Todos os testes rodam sem rede e sem chave (cliente falso).
+- Os testes com o Gemini de verdade são feitos pelo dono do projeto (o ambiente bloqueia o
+  uso da chave pelo assistente); os resultados estão em `docs/estado-do-agente.md`.
+- Plano de segunda, com um requisito novo: o sistema deve entender perguntas diferentes que
+  pedem a mesma coisa, no linguajar simples de quem trabalha no campo. Vale para as evals
+  (grupos de variantes com o mesmo resultado esperado, inclusive erros de digitação), para o
+  prompt (vocabulário da fazenda) e para a busca por nome. Itens: ADR 0005 (datas),
+  `listar_animais`, `animais_abaixo_da_media` e executor mínimo das evals.
+- Primeiro teste real com o Gemini (`gemini-3.5-flash-lite`): "qual a produção total do
+  rebanho na última semana?" e "qual a produção total na última semana?" chegaram à mesma
+  chamada (`dias = 7`, rebanho inteiro) e ao mesmo resultado, 4.479,1 L (09 a 15/11/2026).
+- ADR 0006 escrito: por que o MVP não usa RAG, embeddings nem banco vetorial, e quando
+  reconsiderar.
+- 21 testes manuais com o Gemini (15, mais 3 de reteste e 3 depois da reescrita do prompt),
+  registrados em `docs/estado-do-agente.md`. Três problemas:
+  um número reescrito pelo modelo ("cerca de 639,8" quando a ferramenta devolveu 639,87),
+  pedido de confirmação desnecessário ("quer que eu faça?") e perda de contexto no "sim",
+  porque cada chamada da linha de comando é independente. Prompt ajustado (números exatos,
+  responder de uma vez, avisar que não lembra da conversa); falta reconferir com o modelo real.
+  A solução de fato para o "sim", conversa com histórico, aguarda decisão.
+- A revisão do cliente, do laço e da linha de comando reprovou a primeira versão por ajustes
+  pequenos, todos aplicados: o ADR 0006 citava a spec e o ADR 0001 por coisas que eles não
+  dizem (corrigido); falha de rede virava `Traceback` e não havia limite de tempo (agora vira
+  `ErroLLM`, com timeout de 60 s, e a mensagem de erro leva só o código e o status, nunca o
+  texto do provedor); o prompt prometia consulta por animal e não listava períodos passados
+  como limite (corrigido); só uma exceção própria, `ErroDeFerramenta`, chega ao modelo, e há
+  teto de 10 chamadas por passo; o teste de "só `client.py` importa o SDK" ficou mais
+  robusto. 310 testes passando.
+- `LLM_MODEL` foi definido no `.env` do dono do projeto; o `.env.example` não será alterado.
+- A segunda revisão aprovou o cliente, o laço e a linha de comando, com ajustes menores ainda
+  por tratar: a descrição de `producao_por_periodo` diz que a ferramenta consulta um animal por
+  id, enquanto o prompt diz que o agente não consulta animal (alinhar os dois textos); o
+  `except Exception` do cliente também esconde erro de programação como "falha de conexão";
+  um ADR curto para o contrato "só `ErroDeFerramenta` chega ao modelo"; e pequenos acertos de
+  texto no `estado-do-agente.md` e no exemplo numérico do prompt.
+- Pendente: reconferir com o modelo real a recusa explícita do assunto estranho em pedido
+  misto (teste 16) e a resposta a um "sim" solto (teste 14); decidir sobre conversa com
+  histórico; ADR 0005 (datas e busca por nome); `animais_abaixo_da_media`, `listar_animais` e o
+  executor das evals; push e primeira rodada da CI no Python 3.12. Antes do Docker: incluir
+  `schema.sql` como `package-data` no `pyproject.toml`, senão o arquivo não vai na instalação
+  não editável.
