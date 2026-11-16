@@ -8,7 +8,7 @@ gerador.
 import json
 import sqlite3
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -21,6 +21,7 @@ from app.db.connection import (
     criar_schema,
 )
 from app.db.seed import DATA_FIM, Producao, gerar_dados, gravar_dados
+from app.tools.erros import ErroDeFerramenta
 from app.tools.producao import producao_por_periodo
 from app.tools.registro import executar_ferramenta
 
@@ -187,6 +188,23 @@ def test_animal_inativo_pode_ser_consultado_por_id(conn: sqlite3.Connection) -> 
 
 
 # --- entradas inválidas --------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "chamada",
+    [
+        lambda c: producao_por_periodo(c, 0),
+        lambda c: producao_por_periodo(c, "7"),  # type: ignore[arg-type]
+        lambda c: producao_por_periodo(c, 7, animal_id=999),
+        lambda c: producao_por_periodo(c, 7, animal_id=10**30),
+    ],
+)
+def test_erros_previstos_sao_erro_de_ferramenta(
+    conn: sqlite3.Connection, chamada: Callable[[sqlite3.Connection], object]
+) -> None:
+    # É esse tipo de erro que o laço do agente devolve ao modelo, com a mensagem original.
+    with pytest.raises(ErroDeFerramenta):
+        chamada(conn)
 
 
 def test_animal_inexistente_e_erro_claro(conn: sqlite3.Connection) -> None:

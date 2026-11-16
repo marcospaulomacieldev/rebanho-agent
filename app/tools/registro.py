@@ -16,6 +16,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from app.tools.erros import ErroDeFerramenta
 from app.tools.producao import producao_por_periodo
 
 
@@ -87,26 +88,30 @@ def executar_ferramenta(
     `argumentos` nulo vale como "nenhum argumento" (alguns provedores enviam uma chamada
     sem objeto de argumentos).
 
-    Levanta ValueError (com mensagem em português, que o laço do agente devolve ao modelo)
-    se a ferramenta não existir, se os argumentos não forem um objeto de nomes em texto, ou
-    se tiverem nomes desconhecidos ou faltarem. Erros de valor (como `dias` fora do
-    intervalo) vêm da própria ferramenta, também como ValueError.
+    Levanta ErroDeFerramenta (um ValueError, com mensagem em português que o laço do agente
+    devolve ao modelo) se a ferramenta não existir, se os argumentos não forem um objeto de
+    nomes em texto, ou se tiverem nomes desconhecidos ou faltarem. Erros de valor (como
+    `dias` fora do intervalo) vêm da própria ferramenta, também como ErroDeFerramenta.
     """
     ferramenta = REGISTRO.get(nome) if isinstance(nome, str) else None
     if argumentos is None:
         argumentos = {}
     if not isinstance(argumentos, Mapping):
-        raise ValueError("Os argumentos devem ser um objeto (nome do argumento -> valor).")
+        raise ErroDeFerramenta("Os argumentos devem ser um objeto (nome do argumento -> valor).")
     if not all(isinstance(chave, str) for chave in argumentos):
-        raise ValueError("Os nomes dos argumentos devem ser texto.")
+        raise ErroDeFerramenta("Os nomes dos argumentos devem ser texto.")
     if ferramenta is None:
         disponiveis = ", ".join(sorted(REGISTRO))
-        raise ValueError(f"Ferramenta desconhecida: {nome}. Disponíveis: {disponiveis}.")
+        raise ErroDeFerramenta(f"Ferramenta desconhecida: {nome}. Disponíveis: {disponiveis}.")
     propriedades = ferramenta.parametros.get("properties", {})
     desconhecidos = sorted(set(argumentos) - set(propriedades))
     if desconhecidos:
-        raise ValueError(f"Argumentos não reconhecidos em {nome}: {', '.join(desconhecidos)}.")
+        raise ErroDeFerramenta(
+            f"Argumentos não reconhecidos em {nome}: {', '.join(desconhecidos)}."
+        )
     faltando = [n for n in ferramenta.parametros.get("required", []) if n not in argumentos]
     if faltando:
-        raise ValueError(f"Argumentos obrigatórios ausentes em {nome}: {', '.join(faltando)}.")
+        raise ErroDeFerramenta(
+            f"Argumentos obrigatórios ausentes em {nome}: {', '.join(faltando)}."
+        )
     return ferramenta.funcao(conn, **argumentos)
