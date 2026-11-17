@@ -108,9 +108,62 @@ Serve de memória do projeto: decisões, erros e aprendizados.
   `except Exception` do cliente também esconde erro de programação como "falha de conexão";
   um ADR curto para o contrato "só `ErroDeFerramenta` chega ao modelo"; e pequenos acertos de
   texto no `estado-do-agente.md` e no exemplo numérico do prompt.
-- Pendente: reconferir com o modelo real a recusa explícita do assunto estranho em pedido
-  misto (teste 16) e a resposta a um "sim" solto (teste 14); decidir sobre conversa com
-  histórico; ADR 0005 (datas e busca por nome); `animais_abaixo_da_media`, `listar_animais` e o
-  executor das evals; push e primeira rodada da CI no Python 3.12. Antes do Docker: incluir
-  `schema.sql` como `package-data` no `pyproject.toml`, senão o arquivo não vai na instalação
-  não editável.
+- Primeiro push para o GitHub (repositório privado `rebanho-agent`). A CI passou na primeira
+  rodada, no Python 3.12 e em Linux, sem chave de API e sem rede (34 s).
+
+## 2026-11-16
+- Plano de segunda aprovado: nome ambíguo sempre pergunta, `listar_animais` antes de
+  `animais_abaixo_da_media`, conversa com histórico depois das evals. Requisito central: o
+  produtor pergunta do jeito dele e o sistema chega ao mesmo resultado.
+- **ADR 0005 aceito** e spec atualizada (seção 3): período por `dias` ou por
+  `data_inicio` + `data_fim`, "sem registro" como nulo e não zero, `listar_animais` com
+  `sugestoes`, nova subseção "Comportamento do agente" e um critério de sucesso para perguntas
+  equivalentes (90%).
+- **`producao_por_periodo` com datas:** resolvedor único em `app/tools/periodo.py`, retorno com
+  `litros_manha_total` e `litros_tarde_total`, erros claros (datas misturadas, no futuro, fora do
+  intervalo, com o intervalo disponível). Nulo e texto vazio nos parâmetros opcionais valem como
+  omitidos, porque o Gemini os envia.
+- **`listar_animais`:** busca por nome sem diferenciar acento nem maiúsculas, filtros por fase e
+  lote, `incluir_inativos`, limite de 100 e `sugestoes` para erro de digitação ("mimoza" sugere
+  Mimosa), só com a biblioteca padrão (`difflib`), sem embeddings (ADR 0006).
+- **Prompt reescrito** e agora montado a cada pergunta, com as datas do banco (primeiro dia,
+  último dia e dia da semana); nenhum texto de usuário ou de ferramenta entra no prompt de
+  sistema. Traz as regras de nome ambíguo, "semana passada", "sem registro" e dia/mês sem ano.
+- **Interface de teste:** `python -m app.ask` sem pergunta abre um modo interativo (comandos
+  `/chamadas`, `/ajuda`, `/sair`, tempo e passos por pergunta, o prompt é relido a cada
+  pergunta); `scripts/perguntar.cmd` abre tudo com um comando. É só para desenvolvimento.
+- **Erro corrigido:** o ADR 0005 dizia que "estrela" casava com "Estrelinha". Não casa (só
+  "estrel" casa com os dois). A ambiguidade real do banco é "mel", que casa com Mel e Caramelo.
+  O ADR e os casos de eval foram corrigidos.
+- CI: `ubuntu-24.04` e `actions/checkout`/`setup-python` na v7 (ainda sem rodar no GitHub).
+- 429 testes passando; as evals de `listar_animais` (7 casos) e de `producao_por_periodo` (4
+  casos) são dados conferidos contra o banco.
+- **Executor de evals** (ADR 0007, `python -m evals.run`): casos com `variantes`,
+  `chamadas_esperadas` em sequência, recusas e pergunta de volta; checagens determinísticas
+  (ferramenta, argumentos idênticos ou equivalentes por resultado, números em português no
+  texto, fidelidade numérica); repetições por pergunta; espera e nova tentativa em erro 429 e
+  503, com falha de infraestrutura fora das taxas; relatório no terminal e em JSON
+  (`evals/resultados/`, fora do Git). 23 casos e 30 perguntas. `ErroLLM` ganhou o atributo
+  `codigo`. Testado com cliente falso (516 testes passando).
+- **Primeira amostra das evals com o modelo real** (`gemini-3.5-flash-lite`, árvore com mudanças
+  não commitadas sobre o commit 26bb80f): 3 dos 23 casos (`rebanho-ultima-semana`,
+  `mimosa-dia-especifico`, `mel-nome-ambiguo`), 7 perguntas, 2 repetições, 14 execuções válidas
+  e nenhuma falha de infraestrutura. Todas as 14 passaram em todas as checagens (ferramenta,
+  argumentos, números 12/12, fidelidade, comportamento 2/2, consistência 2/2 casos). É amostra
+  pequena e só de 3 casos: **não mede os critérios de 90% da spec**. Latência do modelo por
+  pergunta: mediana 14,9 s e percentil 90 de 17,5 s, com 2,57 passos em média; é alta para o
+  uso real e precisa ser investigada.
+- **Revisão dos blocos de segunda: aprovado com ajustes**, todos aplicados. Os principais: nas
+  evals, só rede, chave, 429 e 5xx ficam fora das taxas (resposta vazia ou bloqueada agora
+  conta como reprovação); casos frouxos ganharam trechos de recusa e alternativas; rodada
+  interrompida sai com código 1 e grava o parcial, inclusive com Ctrl+C; números de datas não
+  contam mais como valores; `listar_animais` devolve `encontrados_entre_inativos` em vez de
+  sugerir nomes errados para animal que saiu da fazenda; o prompt cita o lote no nome ambíguo;
+  a descrição de `producao_por_periodo` não cita mais uma ferramenta que não existe. Cinco casos
+  novos (semana passada, mês passado, pedido misto, pergunta vaga, "sim" solto): 28 casos e 35
+  perguntas. 543 testes passando e 6 pulados (casos sem chamada esperada).
+- A amostra de 14 execuções foi medida **antes** desses ajustes de prompt, de ferramenta e de
+  casos; não vale para a versão atual.
+- Pendente: rodada completa das evals (28 casos) sobre um commit limpo; investigar a latência; `animais_abaixo_da_media`; README; reconferir com o modelo real o prompt novo, a recusa do assunto estranho em
+  pedido misto (teste 16) e o "sim" solto (teste 14). Antes do Docker: incluir `schema.sql`
+  como `package-data` no `pyproject.toml`, senão o arquivo não vai na instalação não editável.

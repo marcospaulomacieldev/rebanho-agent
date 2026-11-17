@@ -1,5 +1,10 @@
 # Estado do agente
 
+> **Retrato de 2026-11-15.** Este documento descreve o agente quando só existia a ferramenta
+> `producao_por_periodo` com janela em dias. Desde 2026-11-16 o agente consulta por datas e acha
+> animais pelo nome (`listar_animais`), e a medição passou a ser feita pelas evals
+> (`evals/README.md`, ADR 0007). O texto abaixo fica como registro histórico dos testes manuais.
+
 **Data:** 2026-11-15. **Modelo:** `gemini-3.5-flash-lite`. **Dados:** banco sintético, semente 42
 (90 dias, de 2026-08-18 a 2026-11-15). **Ferramenta disponível:** `producao_por_periodo`.
 
