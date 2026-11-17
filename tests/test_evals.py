@@ -4,6 +4,7 @@ Tudo com cliente falso: sem rede, sem chave e sem esperar de verdade.
 """
 
 import json
+import subprocess
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from decimal import Decimal
 from pathlib import Path
@@ -11,18 +12,21 @@ from typing import Any
 
 import pytest
 
-from app.agente import ChamadaExecutada, RespostaAgente
+from app.agente import MENSAGEM_SEM_CONFIRMACAO, ChamadaExecutada, RespostaAgente
+from app.fidelidade import (
+    interpretar_numero,
+    litros_do_texto,
+    litros_dos_resultados,
+    litros_sem_origem,
+    numeros_do_texto,
+)
 from app.llm.client import ChamadaFerramenta, ErroLLM, Mensagem, RespostaLLM
 from evals import relatorio as rel
 from evals.casos import Caso, Chamada, ErroDeCaso, carregar_casos
 from evals.checagens import (
     aprovada,
     avaliar,
-    interpretar_numero,
-    litros_do_texto,
-    litros_dos_resultados,
     normalizar_argumentos,
-    numeros_do_texto,
 )
 from evals.cliente import ClienteComEspera, TetoDeChamadas
 from evals.executor import (
@@ -31,7 +35,7 @@ from evals.executor import (
     resultados_das_chamadas_esperadas,
     resumir,
 )
-from evals.run import main
+from evals.run import _versao_do_codigo, main
 
 Roteiro = Callable[[Sequence[Mensagem]], RespostaLLM]
 
@@ -149,6 +153,26 @@ def test_litros_do_texto_so_pega_numero_seguido_de_litros() -> None:
     texto = "Foram 4.479,1 litros em 7 dias, de 09/11/2026 a 15/11/2026 (639,87 L por dia)."
     assert litros_do_texto(texto) == [{Decimal("4479.1")}, {Decimal("639.87")}]
     assert litros_do_texto("Sem registro em 21/10/2026.") == []
+
+
+def test_litros_sem_origem_aponta_so_o_numero_que_nao_veio_de_ferramenta() -> None:
+    resultados = [{"litros_total": 18.8, "litros_media_dia": 9.4}]
+    assert litros_sem_origem("Foram 18,8 litros, média de 9,4 litros.", resultados) == []
+    assert litros_sem_origem("Foram 20 litros.", resultados) == [{Decimal("20")}]
+    assert litros_sem_origem("Foram 20 litros.", []) == [{Decimal("20")}]
+    assert litros_sem_origem("Menos de 20 litros?", [], "quais dão menos de 20 litros") == []
+    # O número da pergunta só vale se estiver colado a "litros": "7 dias" não autoriza "7 L".
+    assert litros_sem_origem("Foram 7 litros.", [], "produção dos últimos 7 dias") == [
+        {Decimal("7")}
+    ]
+    # Mesmo valor escrito de formas diferentes: 18,80 e 18.8 são o mesmo número.
+    assert litros_sem_origem("Foram 18,80 litros.", resultados) == []
+    # "4.479" é ambíguo (quatro mil ou quatro vírgula quatro); aceito se uma das leituras bate.
+    assert litros_sem_origem("Foram 4.479 litros.", [{"litros_total": 4479}]) == []
+    # O valor pode vir de um resultado aninhado (lista de dias dentro do resultado).
+    aninhado = [{"dias": [{"data": "2026-11-15", "litros_dia": 31.2}]}]
+    assert litros_sem_origem("No dia, 31,2 litros.", aninhado) == []
+    assert litros_sem_origem("Sem registro em 21/10/2026.", []) == []
 
 
 def test_litros_dos_resultados_ignora_campos_que_nao_sao_de_litros() -> None:
@@ -538,7 +562,14 @@ def test_rodada_com_agente_que_inventa_reprova_numeros_e_consistencia(bancos: Ba
     resumo = resumir([CASO_SEMANA], rodada)
     assert resumo["metricas"]["ferramenta"]["taxa"] == 1.0
     assert resumo["metricas"]["numeros"]["taxa"] == 0.0
+    # A trava do agente (ADR 0008) barra o número inventado e a resposta entregue não tem
+    # litros. Mesmo assim a fidelidade reprova: ela olha também o texto barrado, porque quem
+    # inventou foi o modelo (revisão de 2026-11-17; antes, a métrica dava 100% aqui).
     assert resumo["metricas"]["fidelidade"]["taxa"] == 0.0
+    assert resumo["execucoes_com_trava"] == 2
+    # Barrada, pedido de correção, barrada de novo: dois textos guardados por execução.
+    assert [len(e.respostas_barradas) for e in rodada.execucoes] == [2, 2]
+    assert all(e.resposta == MENSAGEM_SEM_CONFIRMACAO for e in rodada.execucoes)
     assert resumo["metricas"]["execucao_aprovada"]["acertos"] == 0
     assert resumo["metricas"]["consistencia_entre_variantes"] == {
         "acertos": 0,
@@ -646,8 +677,11 @@ def test_relatorio_em_texto_mostra_taxas_falhas_e_aviso_de_amostra(bancos: Banco
     assert "não medido" in texto  # comportamento não foi definido neste caso
     assert "amostra pequena" in texto
     assert "mudanças não commitadas" in texto
-    assert "reprovou em: numeros, fidelidade" in texto
-    assert "cerca de 4.500 litros" in texto
+    assert "reprovou em: numeros" in texto
+    assert "resposta: O rebanho produziu cerca" not in texto  # o inventado não foi entregue
+    assert f"entregue: {MENSAGEM_SEM_CONFIRMACAO}" in texto
+    assert "Execuções em que a trava de litros barrou uma resposta: 2" in texto
+    assert "barrada: O rebanho produziu cerca de 4.500 litros." in texto
     json.dumps(relatorio)  # o relatório inteiro é serializável
 
 
@@ -688,6 +722,7 @@ def test_linha_de_comando_roda_grava_o_json_e_imprime_o_resumo(
     assert gravado["metadados"]["modelo"] == "modelo-falso"
     assert gravado["metadados"]["chamadas_ao_modelo"] == 8
     assert len(gravado["metadados"]["prompt_sha256"]) == 64
+    assert gravado["metadados"]["codigo_mudou_durante_a_rodada"] is False
     assert len(gravado["execucoes"]) == 4
     assert gravado["resumo"]["metricas"]["numeros"]["taxa"] == 1.0
 
@@ -741,3 +776,81 @@ def test_rodada_sem_nenhuma_execucao_valida_sai_com_1(tmp_path: Path) -> None:
     gravado = json.loads(arquivo.read_text(encoding="utf-8"))
     assert gravado["resumo"]["interrompida"]
     assert gravado["resumo"]["execucoes_validas"] == 0
+
+
+def test_relatorio_avisa_quando_o_codigo_mudou_durante_a_rodada(bancos: Bancos) -> None:
+    # Em 2026-11-17 uma rodada começou com o código antigo e terminou com o novo, e o relatório
+    # atribuiu tudo à versão nova. Agora a versão é lida antes e conferida depois.
+    rodada = executar([CASO_SEMANA], com_espera(agente_certo), bancos, repeticoes=1)
+    metadados = {"modelo": "m", "repeticoes": 1, "commit": "abc", "arvore_suja": True}
+    sem_mudanca = rel.formatar(rel.montar(metadados, resumir([CASO_SEMANA], rodada), rodada))
+    assert "mudou durante a rodada" not in sem_mudanca
+    metadados["codigo_mudou_durante_a_rodada"] = True
+    com_mudanca = rel.formatar(rel.montar(metadados, resumir([CASO_SEMANA], rodada), rodada))
+    assert "o código ou o prompt mudou durante a rodada" in com_mudanca
+
+
+def _repositorio_git(pasta: Path) -> Path | None:
+    """Um repositório git de verdade numa pasta temporária, ou None se não houver git."""
+    try:
+        for comando in (
+            ["init", "-q"],
+            ["config", "user.email", "teste@exemplo.invalid"],
+            ["config", "user.name", "Teste"],
+        ):
+            subprocess.run(["git", *comando], cwd=pasta, check=True, capture_output=True)
+        (pasta / "a.md").write_text("início\n", encoding="utf-8")
+        subprocess.run(["git", "add", "a.md"], cwd=pasta, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-qm", "c"], cwd=pasta, check=True, capture_output=True)
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return pasta
+
+
+def test_versao_do_codigo_aguenta_diff_com_acento_e_aspas_curvas(tmp_path: Path) -> None:
+    # Em cp1252 (o padrão do Windows), os bytes UTF-8 de "Á", "Í" e "”" não existem, e a leitura
+    # da saída do git quebrava a rodada inteira. Achado da revisão de 2026-11-17.
+    raiz = _repositorio_git(tmp_path)
+    if raiz is None:
+        pytest.skip("git indisponível")
+    limpa = _versao_do_codigo(raiz)
+    assert limpa["git_status"] == ""
+    assert limpa["commit"]
+    (raiz / "a.md").write_text("ÁREA de produção, “Íris”\n", encoding="utf-8")
+    suja = _versao_do_codigo(raiz)
+    assert suja["git_status"]
+    assert suja["conteudo_sha256"] != limpa["conteudo_sha256"]
+
+
+def test_versao_do_codigo_muda_com_segunda_edicao_e_com_arquivo_novo(tmp_path: Path) -> None:
+    raiz = _repositorio_git(tmp_path)
+    if raiz is None:
+        pytest.skip("git indisponível")
+    (raiz / "a.md").write_text("primeira edição\n", encoding="utf-8")
+    primeira = _versao_do_codigo(raiz)
+    (raiz / "a.md").write_text("segunda edição\n", encoding="utf-8")
+    segunda = _versao_do_codigo(raiz)
+    # O status (" M a.md") é igual nas duas; só o hash do conteúdo pega a segunda edição.
+    assert primeira["git_status"] == segunda["git_status"]
+    assert primeira["conteudo_sha256"] != segunda["conteudo_sha256"]
+    assert _versao_do_codigo(raiz) == segunda  # sem mudança, a versão é estável
+    (raiz / "novo.py").write_bytes(b"x = 1\n")
+    assert _versao_do_codigo(raiz)["conteudo_sha256"] != segunda["conteudo_sha256"]
+
+
+def test_versao_do_codigo_inclui_arquivo_novo_com_acento_no_nome(tmp_path: Path) -> None:
+    # Sem `ls-files -z`, o git põe o nome entre aspas com escapes, e o arquivo ficava fora do
+    # hash sem aviso (achado da segunda revisão de 2026-11-17).
+    raiz = _repositorio_git(tmp_path)
+    if raiz is None:
+        pytest.skip("git indisponível")
+    (raiz / "ração.py").write_bytes(b"x = 1\n")
+    antes = _versao_do_codigo(raiz)
+    (raiz / "ração.py").write_bytes(b"x = 2\n")
+    assert _versao_do_codigo(raiz)["conteudo_sha256"] != antes["conteudo_sha256"]
+
+
+def test_versao_do_codigo_sem_git_tem_hash_nulo(tmp_path: Path) -> None:
+    # Uma pasta que não é repositório: o git falha, e o hash fica nulo em vez de um hash de
+    # texto vazio, que seria igual em estados diferentes.
+    assert _versao_do_codigo(tmp_path)["conteudo_sha256"] is None

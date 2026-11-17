@@ -13,6 +13,7 @@ from google.genai import errors
 
 from app.db.connection import criar_banco_em_memoria
 from app.db.seed import gerar_dados, gravar_dados
+from app.fidelidade import numeros_do_texto
 from app.llm.client import (
     ChamadaFerramenta,
     ClienteGemini,
@@ -26,7 +27,6 @@ from app.tools.erros import ErroDeFerramenta
 from app.tools.periodo import resolver_periodo
 from app.tools.producao import producao_por_periodo
 from evals.casos import Caso, Chamada
-from evals.checagens import numeros_do_texto
 from evals.cliente import ClienteComEspera
 from evals.executor import Bancos, executar, falha_de_infraestrutura, resumir
 from evals.run import main
@@ -128,8 +128,45 @@ def test_erro_de_digitacao_continua_sugerindo_quando_nao_ha_inativo(
     conn: sqlite3.Connection,
 ) -> None:
     resultado = listar_animais(conn, nome="mimoza")
-    assert resultado["sugestoes"] == ["Mimosa"]
+    assert resultado["nome_considerado"] == "Mimosa"
     assert resultado["encontrados_entre_inativos"] == 0
+
+
+ERROS_DE_DIGITACAO = (
+    "mimoza", "gabriella", "estrella", "estrelinah", "carmelo", "pintda", "dona", "mimsa",
+    "bonta", "cerja", "caramel", "branka", "violta", "aurorra", "xuxinha", "lunna", "mell",
+    "rosana", "joana", "zebra", "melzinha",
+)  # fmt: skip
+
+
+@pytest.mark.parametrize("digitado", ERROS_DE_DIGITACAO)
+def test_animal_com_nome_de_instrucao_nunca_vira_sugestao(
+    conn: sqlite3.Connection, digitado: str
+) -> None:
+    resultado = listar_animais(conn, nome=digitado)
+    nomes = [*resultado["sugestoes"], resultado["nome_considerado"] or ""]
+    assert not any("Ignore" in nome for nome in nomes)
+
+
+@pytest.mark.parametrize(
+    ("digitado", "esperado"),
+    [
+        ("mimoza", ["Mimosa"]),  # uma só: a ferramenta já traz o animal (nome_considerado)
+        ("estrella", ["Estrela", "Estrelinha"]),
+        ("sereja", ["Cereja", "Sereia", "Serena"]),  # pelo som; várias: o agente pergunta
+        ("xita", ["Chita"]),  # pelo som
+        ("estrelinah", ["Estrelinha", "Estrela"]),  # mais de uma: o agente pergunta
+        ("rosana", []),  # Rosa fica em 0,80: abaixo do limiar, não é assumida
+        ("dona", []),  # existe entre os inativos: nenhuma sugestão
+    ],
+)
+def test_sugestoes_no_banco_do_gerador(
+    conn: sqlite3.Connection, digitado: str, esperado: list[str]
+) -> None:
+    resultado = listar_animais(conn, nome=digitado)
+    considerado = [resultado["nome_considerado"]] if resultado["nome_considerado"] else []
+    assert considerado + resultado["sugestoes"] == esperado
+    assert not (considerado and resultado["sugestoes"])  # nunca os dois ao mesmo tempo
 
 
 def test_mensagem_de_filtro_invalido_tem_tamanho_limitado(conn: sqlite3.Connection) -> None:

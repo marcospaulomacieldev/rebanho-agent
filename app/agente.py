@@ -8,11 +8,12 @@ como dado, e o modelo redige a resposta final (ADR 0001).
 import logging
 import sqlite3
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
 from app.db.producao import data_de_referencia, data_minima
+from app.fidelidade import litros_sem_origem
 from app.llm.client import (
     ChamadaFerramenta,
     ClienteLLM,
@@ -42,6 +43,11 @@ ERRO_CHAMADAS_DEMAIS = (
 )
 MENSAGEM_SEM_RESPOSTA = "Não consegui chegar a uma resposta. Pode perguntar de outro jeito?"
 ERRO_INTERNO = "Erro interno ao consultar os dados."
+MAX_CORRECOES = 1
+MENSAGEM_SEM_CONFIRMACAO = (
+    "Não consegui confirmar esses números nos dados da fazenda, então prefiro não informar. "
+    "Pode perguntar de novo?"
+)
 
 
 @dataclass(frozen=True)
@@ -60,6 +66,9 @@ class RespostaAgente:
     chamadas: tuple[ChamadaExecutada, ...]
     passos: int
     completa: bool  # falso se o limite de passos acabou ou o modelo não escreveu resposta
+    # Textos que a trava não entregou por trazerem litros sem origem (ADR 0008). Ficam aqui
+    # para as evals mostrarem o que foi barrado: invenção, arredondamento ou falso positivo.
+    barradas: tuple[str, ...] = ()
 
 
 def carregar_prompt(nome: str = "sistema") -> str:
@@ -79,6 +88,14 @@ def _dia_e_data(texto: str | None) -> tuple[str, str, str]:
     return texto, data.strftime("%d/%m/%Y"), DIAS_DA_SEMANA[data.weekday()]
 
 
+def _dia_anterior(texto: str | None, dias: int) -> tuple[str, str]:
+    """(AAAA-MM-DD, dia/mês/ano) de `dias` antes de uma data ISO; "sem registros" se nula."""
+    if texto is None:
+        return ("sem registros",) * 2
+    data = date.fromisoformat(texto) - timedelta(days=dias)
+    return data.isoformat(), data.strftime("%d/%m/%Y")
+
+
 def montar_prompt(conn: sqlite3.Connection, nome: str = "sistema") -> str:
     """Prompt final: o modelo de `prompts/<nome>.md` com as datas dos dados preenchidas.
 
@@ -86,9 +103,18 @@ def montar_prompt(conn: sqlite3.Connection, nome: str = "sistema") -> str:
     dia mais recente com registro, e o primeiro dia). Nada digitado pelo usuário nem devolvido
     por ferramenta é colocado no prompt de sistema (ADR 0005).
     """
-    ultimo, ultimo_br, dia_da_semana = _dia_e_data(data_de_referencia(conn))
+    referencia = data_de_referencia(conn)  # ISO, ou None se não há produção
+    ultimo, ultimo_br, dia_da_semana = _dia_e_data(referencia)
     _, primeiro_br, _ = _dia_e_data(data_minima(conn))
+    # "Ontem" e "anteontem" já vão calculados: numa rodada das evals de 2026-11-17 o modelo
+    # fez a conta e consultou o dia errado para "ontem" (devlog, "Rodada do nome exato").
+    ontem, ontem_br = _dia_anterior(referencia, 1)
+    anteontem, anteontem_br = _dia_anterior(referencia, 2)
     valores = {
+        "ontem": ontem,
+        "ontem_br": ontem_br,
+        "anteontem": anteontem,
+        "anteontem_br": anteontem_br,
         "ultimo_dia": ultimo,
         "ultimo_dia_br": ultimo_br,
         "dia_da_semana": dia_da_semana,
@@ -100,9 +126,7 @@ def montar_prompt(conn: sqlite3.Connection, nome: str = "sistema") -> str:
     return texto
 
 
-def _executar(
-    conn: sqlite3.Connection, chamada: ChamadaFerramenta
-) -> tuple[dict[str, Any], bool]:
+def _executar(conn: sqlite3.Connection, chamada: ChamadaFerramenta) -> tuple[dict[str, Any], bool]:
     """Executa uma chamada do modelo. Devolve (resultado, houve_erro). Nunca levanta."""
     try:
         return executar_ferramenta(conn, chamada.nome, chamada.argumentos), False
@@ -127,6 +151,11 @@ def responder(
     isso, e é essa conexão que garante que nada seja escrito. Levanta ValueError se a pergunta
     for vazia ou longa demais, e ErroLLM (do cliente) se o modelo falhar. Em cada passo, só as
     primeiras `MAX_CHAMADAS_POR_PASSO` chamadas pedidas pelo modelo são executadas.
+
+    Trava de fidelidade (ADR 0008): uma resposta com um número de litros que não veio de
+    nenhuma ferramenta desta pergunta não é entregue. Na primeira vez, o modelo recebe um
+    pedido de correção (`prompts/correcao_litros.md`) e tenta de novo; se insistir, a pessoa
+    recebe `MENSAGEM_SEM_CONFIRMACAO`, sem números, e `completa` fica falso.
     """
     pergunta = pergunta.strip()
     if not pergunta:
@@ -138,6 +167,7 @@ def responder(
     ferramentas = declaracoes_neutras()
     mensagens = [Mensagem(papel="usuario", texto=pergunta)]
     executadas: list[ChamadaExecutada] = []
+    barradas: list[str] = []
 
     for passo in range(1, max_passos + 1):
         resposta = cliente.gerar(instrucoes, mensagens, ferramentas)
@@ -151,11 +181,27 @@ def responder(
         )
         if not resposta.chamadas:
             texto = (resposta.texto or "").strip()
+            if litros_sem_origem(texto, [c.resultado for c in executadas], pergunta):
+                logger.warning("Resposta com litros que não vieram de ferramenta (passo %d)", passo)
+                barradas.append(texto)
+                if len(barradas) > MAX_CORRECOES:
+                    return RespostaAgente(
+                        texto=MENSAGEM_SEM_CONFIRMACAO,
+                        chamadas=tuple(executadas),
+                        passos=passo,
+                        completa=False,
+                        barradas=tuple(barradas),
+                    )
+                mensagens.append(
+                    Mensagem(papel="usuario", texto=carregar_prompt("correcao_litros"))
+                )
+                continue
             return RespostaAgente(
                 texto=texto or MENSAGEM_SEM_RESPOSTA,
                 chamadas=tuple(executadas),
                 passos=passo,
                 completa=bool(texto),
+                barradas=tuple(barradas),
             )
 
         resultados = []
@@ -176,4 +222,5 @@ def responder(
         chamadas=tuple(executadas),
         passos=max_passos,
         completa=False,
+        barradas=tuple(barradas),
     )

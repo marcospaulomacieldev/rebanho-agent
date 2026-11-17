@@ -10,6 +10,7 @@ import pytest
 from app import agente
 from app.agente import (
     MAX_PASSOS,
+    MENSAGEM_SEM_CONFIRMACAO,
     MENSAGEM_SEM_RESPOSTA,
     carregar_prompt,
     montar_prompt,
@@ -210,7 +211,9 @@ def test_prompt_pede_numeros_exatos_resposta_direta_e_avisa_que_nao_tem_memoria(
     prompt = " ".join(carregar_prompt().split())  # ignora as quebras de linha do arquivo
     assert "exatamente como a ferramenta devolveu" in prompt  # não arredondar nem recalcular
     assert "Não peça confirmação" in prompt  # sem "quer que eu faça?"
-    assert "Não o ignore em silêncio" in prompt  # pedido misto: recusar a parte fora do assunto
+    assert (
+        "Não ignore o outro assunto em silêncio" in prompt
+    )  # pedido misto: recusar a parte fora do assunto
     assert "Você não lembra de conversas anteriores" in prompt  # o laço atual é de uma só pergunta
 
 
@@ -238,7 +241,11 @@ def test_prompt_nao_promete_o_que_as_ferramentas_ainda_nao_fazem() -> None:
 def test_prompt_traz_as_regras_de_nome_data_e_sem_registro() -> None:
     prompt = " ".join(carregar_prompt().split())
     assert "sempre pergunte qual" in prompt  # nome que casa com mais de um animal
-    assert "Você quis dizer" in prompt  # nome com erro de digitação (sugestões)
+    assert "Você quis dizer" in prompt  # erro de digitação com mais de uma sugestão
+    assert "`nome_considerado`" in prompt  # uma sugestão: a busca já trouxe o animal
+    assert "**não escolha nenhuma**" in prompt  # várias sugestões: pergunta
+    assert "considerei a Mimosa" in prompt
+    assert "**Pedido misturado.**" in prompt  # a regra fica junto de "Fora do assunto"
     assert "incluindo os que saíram da fazenda" in prompt  # tenta de novo com inativos
     assert 'nunca "0 litros"' in prompt  # sem registro não é zero
     assert "**manhã**" in prompt and "**tarde**" in prompt  # pergunta de um dia
@@ -246,9 +253,29 @@ def test_prompt_traz_as_regras_de_nome_data_e_sem_registro() -> None:
     assert "diga as datas que usou" in prompt  # semana passada, mês passado
 
 
+def test_prompt_nao_tem_exemplo_que_puxa_numero_inventado() -> None:
+    # Com a regra "a primeira frase recusa o outro assunto", o modelo respondia de uma vez,
+    # sem chamar a ferramenta, e inventava os litros (evals de 2026-11-17). Tirar o exemplo
+    # que terminava em "o rebanho produziu..." não bastou; a regra agora manda consultar antes
+    # de escrever. Quem garante de fato é a trava do laço (ADR 0008), não este texto.
+    prompt = " ".join(carregar_prompt().split())
+    assert "produziu..." not in prompt
+    assert "Nunca escreva uma quantidade de litros sem ter chamado a ferramenta" in prompt
+    assert "**Primeiro, chame a ferramenta** da parte da fazenda" in prompt
+
+
 def test_prompt_so_tem_marcadores_conhecidos() -> None:
     marcadores = set(re.findall(r"\{\{(\w+)\}\}", carregar_prompt()))
-    assert marcadores == {"ultimo_dia", "ultimo_dia_br", "dia_da_semana", "primeiro_dia_br"}
+    assert marcadores == {
+        "ultimo_dia",
+        "ultimo_dia_br",
+        "dia_da_semana",
+        "primeiro_dia_br",
+        "ontem",
+        "ontem_br",
+        "anteontem",
+        "anteontem_br",
+    }
 
 
 def test_montar_prompt_preenche_as_datas_do_banco(conn: sqlite3.Connection) -> None:
@@ -258,6 +285,28 @@ def test_montar_prompt_preenche_as_datas_do_banco(conn: sqlite3.Connection) -> N
     assert "domingo" in prompt  # 15/11/2026 caiu num domingo
     assert "18/08/2026" in prompt  # o primeiro dia com registro
     assert "2026-11-15" in prompt  # formato que as ferramentas esperam
+    # "Ontem" e "anteontem" vão prontos, para o modelo não fazer a conta (evals de 2026-11-17).
+    texto = " ".join(prompt.split())
+    assert '"ontem" = 14/11/2026 (nas ferramentas: 2026-11-14)' in texto
+    assert '"anteontem" = 13/11/2026 (nas ferramentas: 2026-11-13)' in texto
+
+
+def test_ontem_atravessa_a_virada_do_mes_e_do_ano() -> None:
+    banco = criar_banco_em_memoria()
+    try:
+        banco.execute(
+            "INSERT INTO animais (id, nome, sexo, raca, data_nascimento, status, lote, ativo)"
+            " VALUES (1, 'Mimosa', 'F', 'holandesa', '2020-03-10', 'lactacao', 'alta_producao', 1)"
+        )
+        banco.execute(
+            "INSERT INTO producao_leite (animal_id, data, litros_manha, litros_tarde)"
+            " VALUES (1, '2027-01-01', 10, 8)"
+        )
+        texto = " ".join(montar_prompt(banco).split())
+        assert '"ontem" = 31/12/2026 (nas ferramentas: 2026-12-31)' in texto
+        assert '"anteontem" = 30/12/2026' in texto
+    finally:
+        banco.close()
 
 
 def test_montar_prompt_informa_o_dia_da_semana_certo() -> None:
@@ -334,3 +383,95 @@ def test_erro_de_ferramenta_chega_ao_modelo_com_a_mensagem_original(
     cliente = ClienteFalso([pede("producao_por_periodo", dias=0), fala("ok")])
     resposta = responder("produção", conn, cliente)
     assert resposta.chamadas[0].resultado == {"erro": "`dias` deve estar entre 1 e 90."}
+
+
+# --- Trava de fidelidade (ADR 0008): litros sem origem em ferramenta não são entregues ---
+
+INVENTADA = "Sobre a relatividade eu não posso ajudar. O rebanho produziu 136.216,1 litros."
+
+
+def _total_dos_30_dias(conn: sqlite3.Connection) -> str:
+    """O total real dos últimos 30 dias, escrito como o agente escreveria (19.639,6)."""
+    litros = executar_ferramenta(conn, "producao_por_periodo", {"dias": 30})["litros_total"]
+    return f"{litros:,.1f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def test_litros_inventados_sem_ferramenta_sao_devolvidos_ao_modelo(
+    conn: sqlite3.Connection,
+) -> None:
+    certa = f"Sobre a relatividade eu não posso ajudar. Foram {_total_dos_30_dias(conn)} litros."
+    cliente = ClienteFalso([fala(INVENTADA), pede("producao_por_periodo", dias=30), fala(certa)])
+    resposta = responder("produção de 30 dias e a relatividade", conn, cliente)
+    assert resposta.texto == certa
+    assert resposta.completa is True
+    assert len(resposta.barradas) == 1
+    assert [c.nome for c in resposta.chamadas] == ["producao_por_periodo"]
+    # O pedido de correção vem do arquivo de prompt e chega ao modelo como mensagem.
+    correcao = cliente.recebido[1][1][-1]
+    assert correcao == Mensagem(papel="usuario", texto=carregar_prompt("correcao_litros"))
+    assert "136.216,1" not in resposta.texto
+    assert resposta.barradas == (INVENTADA,)  # o texto barrado fica guardado para as evals
+
+
+def test_modelo_que_insiste_em_inventar_recebe_a_mensagem_sem_numeros(
+    conn: sqlite3.Connection,
+) -> None:
+    cliente = ClienteFalso([fala(INVENTADA), fala(INVENTADA)])
+    resposta = responder("produção de 30 dias e a relatividade", conn, cliente)
+    assert resposta.texto == MENSAGEM_SEM_CONFIRMACAO
+    assert not re.search(r"\d", resposta.texto)
+    assert resposta.completa is False
+    assert resposta.barradas == (INVENTADA, INVENTADA)  # as duas tentativas ficam guardadas
+    assert len(cliente.recebido) == 2  # um pedido de correção só, sem laço infinito
+
+
+def test_resposta_fiel_nao_e_tocada_pela_trava(conn: sqlite3.Connection) -> None:
+    certa = f"Nos últimos 30 dias o rebanho produziu {_total_dos_30_dias(conn)} litros."
+    cliente = ClienteFalso([pede("producao_por_periodo", dias=30), fala(certa)])
+    resposta = responder("produção dos últimos 30 dias", conn, cliente)
+    assert resposta.texto == certa
+    assert len(resposta.barradas) == 0
+    assert len(cliente.recebido) == 2  # nenhuma chamada a mais ao modelo
+
+
+def test_resposta_sem_litros_nao_aciona_a_trava(conn: sqlite3.Connection) -> None:
+    cliente = ClienteFalso([fala("Qual delas? A Caramelo ou a Mel? Há registros até 15/11/2026.")])
+    resposta = responder("quanto a mel produziu", conn, cliente)
+    assert len(resposta.barradas) == 0
+    assert resposta.completa is True
+
+
+def test_trava_pega_numero_diferente_do_que_a_ferramenta_devolveu(
+    conn: sqlite3.Connection,
+) -> None:
+    cliente = ClienteFalso(
+        [pede("producao_por_periodo", dias=30), fala("Foram 99.999,9 litros."), fala("Foram 1 L.")]
+    )
+    resposta = responder("produção dos últimos 30 dias", conn, cliente)
+    assert resposta.texto == MENSAGEM_SEM_CONFIRMACAO
+    assert resposta.barradas == ("Foram 99.999,9 litros.", "Foram 1 L.")
+
+
+def test_numero_que_a_pessoa_escreveu_na_pergunta_nao_e_invencao(
+    conn: sqlite3.Connection,
+) -> None:
+    texto = "Ainda não consigo dizer quais vacas dão menos de 10 litros."
+    cliente = ClienteFalso([fala(texto)])
+    resposta = responder("quais vacas dão menos de 10 litros?", conn, cliente)
+    assert resposta.texto == texto
+    assert len(resposta.barradas) == 0
+
+
+def test_numero_de_dias_da_pergunta_nao_autoriza_litros(conn: sqlite3.Connection) -> None:
+    # Antes, qualquer número da pergunta era aceito: "7 dias" deixava passar "7 litros".
+    cliente = ClienteFalso([fala("Foram 7 litros."), fala("Foram 7 litros.")])
+    resposta = responder("produção dos últimos 7 dias", conn, cliente)
+    assert resposta.texto == MENSAGEM_SEM_CONFIRMACAO
+
+
+def test_correcao_no_ultimo_passo_termina_sem_resposta(conn: sqlite3.Connection) -> None:
+    cliente = ClienteFalso([fala(INVENTADA)])
+    resposta = responder("produção e relatividade", conn, cliente, max_passos=1)
+    assert resposta.texto == MENSAGEM_SEM_RESPOSTA
+    assert resposta.completa is False
+    assert len(resposta.barradas) == 1

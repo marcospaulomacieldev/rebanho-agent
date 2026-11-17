@@ -61,6 +61,13 @@ def formatar(relatorio: dict[str, Any]) -> str:
         f"Execuções válidas: {resumo['execucoes_validas']}"
         f" | não executadas (falha de infraestrutura): {resumo['execucoes_nao_executadas']}",
     ]
+    if "codigo_mudou_durante_a_rodada" in meta and meta["codigo_mudou_durante_a_rodada"] is None:
+        linhas.append("Atenção: não foi possível ler a versão do código (git indisponível).")
+    if meta.get("codigo_mudou_durante_a_rodada"):
+        linhas.append(
+            "ATENÇÃO: o código ou o prompt mudou durante a rodada. Os resultados misturam"
+            " versões e não descrevem nenhuma delas; rode de novo."
+        )
     if resumo["interrompida"]:
         linhas.append(f"RODADA INTERROMPIDA: {resumo['interrompida']}")
     if resumo["amostra_pequena"]:
@@ -80,6 +87,11 @@ def formatar(relatorio: dict[str, Any]) -> str:
         f" | novas tentativas: {meta.get('novas_tentativas')}"
         f" | passos por pergunta (média): {str(resumo['passos_medios']).replace('.', ',')}"
         f" | chamadas de ferramenta além das esperadas: {resumo['chamadas_a_mais']}"
+    )
+    com_trava = resumo.get("execucoes_com_trava")
+    linhas.append(
+        "  Execuções em que a trava de litros barrou uma resposta: "
+        + ("não medido (relatório anterior à trava)" if com_trava is None else str(com_trava))
     )
     linhas += ["", "Por caso (execuções aprovadas):"]
     linhas.extend(
@@ -109,6 +121,16 @@ def formatar(relatorio: dict[str, Any]) -> str:
             f"    chamadas: {chamadas or 'nenhuma'}",
             f"    resposta: {(e['resposta'] or '').strip()[:300]}",
         ]
+    barradas = [e for e in relatorio["execucoes"] if e.get("respostas_barradas")]
+    if barradas:
+        linhas += ["", "Barradas pela trava de litros (o texto que não foi entregue):"]
+    for e in barradas:
+        linhas.append(
+            f"- {e['caso_id']} (variante {e['variante']}, repetição {e['repeticao']}):"
+            f" {'aprovada' if e['passou'] else 'reprovada'} depois da trava"
+        )
+        linhas.extend(f"    barrada: {texto.strip()[:300]}" for texto in e["respostas_barradas"])
+        linhas.append(f"    entregue: {(e['resposta'] or '').strip()[:300]}")
     nao_executadas = [e for e in relatorio["execucoes"] if not e["executada"]]
     if nao_executadas:
         linhas += ["", "Não executadas:"]

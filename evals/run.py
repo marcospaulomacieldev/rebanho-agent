@@ -28,14 +28,29 @@ RAIZ = Path(__file__).resolve().parents[1]
 PASTA_RESULTADOS = RAIZ / "evals" / "resultados"
 
 
-def _git(*argumentos: str) -> str | None:
+MAX_BYTES_POR_ARQUIVO_NOVO = 1_000_000
+
+
+def _git(*argumentos: str, raiz: Path = RAIZ) -> str | None:
+    """Saída de um comando git, ou None se o git falhar.
+
+    A saída é lida como UTF-8. Sem isso, o Windows usa cp1252, que não tem alguns bytes do
+    UTF-8 (os de "Á", "Í" e das aspas curvas), e um diff com esses caracteres derrubava a rodada.
+    """
     try:
         saida = subprocess.run(
-            ["git", *argumentos], cwd=RAIZ, capture_output=True, text=True, timeout=10, check=True
+            ["git", *argumentos],
+            cwd=raiz,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            check=True,
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    return saida.stdout.strip()
+    return saida.stdout.strip() if saida.stdout is not None else None
 
 
 def _progresso(execucao: Execucao) -> None:
@@ -44,6 +59,40 @@ def _progresso(execucao: Execucao) -> None:
         f"[{execucao.caso_id} v{execucao.variante} r{execucao.repeticao}] {estado}",
         file=sys.stderr,
     )
+
+
+def _versao_do_codigo(raiz: Path = RAIZ) -> dict[str, str | None]:
+    """O que identifica a versão medida: o prompt, o commit, a lista de arquivos alterados e um
+    hash do conteúdo deles (para pegar também uma segunda edição do mesmo arquivo).
+
+    Dos arquivos novos (não rastreados e não ignorados), só o primeiro 1 MB entra no hash, junto
+    com o tamanho: um arquivo grande esquecido na pasta não deixa a leitura cara.
+
+    Se o git falhar, `conteudo_sha256` vem nulo: um hash de texto vazio seria igual em estados
+    diferentes e esconderia a falha.
+    """
+    diff = _git("diff", "HEAD", raiz=raiz)
+    # `-z` separa os nomes por um byte nulo e não põe entre aspas os nomes com acento; sem ele,
+    # "ração.py" viria como "ra\303\247\303\243o.py" e ficaria fora do hash sem aviso.
+    novos = _git("ls-files", "--others", "--exclude-standard", "-z", raiz=raiz)
+    conteudo: str | None = None
+    if diff is not None and novos is not None:
+        resumo = hashlib.sha256(diff.encode("utf-8"))
+        for nome in sorted(n for n in novos.split("\0") if n):
+            caminho = raiz / nome
+            if not caminho.is_file():
+                continue
+            with caminho.open("rb") as arquivo:
+                resumo.update(nome.encode("utf-8"))
+                resumo.update(str(caminho.stat().st_size).encode())
+                resumo.update(arquivo.read(MAX_BYTES_POR_ARQUIVO_NOVO))
+        conteudo = resumo.hexdigest()
+    return {
+        "prompt_sha256": hashlib.sha256(carregar_prompt().encode("utf-8")).hexdigest(),
+        "commit": _git("rev-parse", "--short", "HEAD", raiz=raiz) or "",
+        "git_status": _git("status", "--porcelain", raiz=raiz) or "",
+        "conteudo_sha256": conteudo,
+    }
 
 
 def main(
@@ -120,6 +169,9 @@ def main(
         file=sys.stderr,
     )
     iniciado = datetime.now().astimezone()
+    # A versão é fotografada ANTES da rodada. Antes, era lida no fim: uma edição durante a
+    # rodada fazia o relatório atribuir os resultados do código antigo à versão nova.
+    versao_antes = _versao_do_codigo()
     with Bancos() as bancos:
         rodada = executar(
             casos, com_espera, bancos, repeticoes=args.repeticoes, ao_terminar=_progresso
@@ -132,9 +184,15 @@ def main(
         "repeticoes": args.repeticoes,
         "intervalo_s": args.intervalo,
         "casos": [c.id for c in casos],
-        "commit": _git("rev-parse", "--short", "HEAD"),
-        "arvore_suja": bool(_git("status", "--porcelain")),
-        "prompt_sha256": hashlib.sha256(carregar_prompt().encode("utf-8")).hexdigest(),
+        "commit": versao_antes["commit"] or None,
+        "arvore_suja": bool(versao_antes["git_status"]),
+        "prompt_sha256": versao_antes["prompt_sha256"],
+        # Hash do que não estava commitado: permite saber depois se duas rodadas mediram o mesmo.
+        "conteudo_sha256": versao_antes["conteudo_sha256"],
+        # Nulo quando o git falhou: não dá para saber se a versão mudou.
+        "codigo_mudou_durante_a_rodada": (
+            None if versao_antes["conteudo_sha256"] is None else _versao_do_codigo() != versao_antes
+        ),
         "chamadas_ao_modelo": com_espera.chamadas,
         "novas_tentativas": com_espera.novas_tentativas,
     }

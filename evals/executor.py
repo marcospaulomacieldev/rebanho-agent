@@ -83,6 +83,9 @@ class Execucao:
     latencia_s: float | None  # tempo dentro do modelo, sem as esperas entre chamadas
     erro: str | None
     chamadas_a_mais: int | None = None  # chamadas além das esperadas, quando a sequência bateu
+    # Textos que a trava do agente barrou por trazerem litros sem origem (ADR 0008), para saber
+    # se foi invenção, arredondamento ou falso positivo.
+    respostas_barradas: tuple[str, ...] = ()
 
 
 def falha_de_infraestrutura(erro: ErroLLM) -> bool:
@@ -162,7 +165,7 @@ def executar(
                     )
                     falhas_seguidas = falhas_seguidas + 1 if infra else 0
                 else:
-                    checagens = avaliar(caso, resposta, esperados)
+                    checagens = avaliar(caso, resposta, esperados, pergunta)
                     a_mais = (
                         len(resposta.chamadas) - len(caso.chamadas_esperadas)
                         if caso.chamadas_esperadas and checagens["ferramenta"]
@@ -190,6 +193,7 @@ def executar(
                         latencia_s=round(cliente.tempo_no_modelo - antes, 3),
                         erro=None,
                         chamadas_a_mais=a_mais,
+                        respostas_barradas=resposta.barradas,
                     )
                     falhas_seguidas = 0
                 execucoes.append(execucao)
@@ -261,6 +265,9 @@ def resumir(casos: Sequence[Caso], rodada: Rodada) -> dict[str, Any]:
         "latencia_p90_s": round(_percentil_90(latencias), 3) if latencias else None,
         "passos_medios": round(statistics.fmean(passos), 2) if passos else None,
         "chamadas_a_mais": sum(a_mais),
+        # A fidelidade mede a resposta entregue, já depois da trava. Este número mostra quantas
+        # execuções só ficaram fiéis porque a trava agiu: sem ele, a trava esconderia a falha.
+        "execucoes_com_trava": sum(1 for e in validas if e.respostas_barradas),
         "esperado": {
             caso.id: [
                 {"ferramenta": c.ferramenta, "argumentos": c.argumentos}

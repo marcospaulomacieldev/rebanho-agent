@@ -176,42 +176,51 @@
     "sem_litros_na_resposta": true
   },
   {
-    "id": "mel-nome-ambiguo",
+    "id": "mel-nome-exato-vence",
     "pergunta": "quanto a mel produziu ontem",
+    "semente": 42,
     "chamadas_esperadas": [
       {
         "ferramenta": "listar_animais",
         "argumentos": {
           "nome": "mel"
         }
+      },
+      {
+        "ferramenta": "producao_por_periodo",
+        "argumentos": {
+          "animal_id": 10,
+          "data_inicio": "2026-11-14",
+          "data_fim": "2026-11-14"
+        }
       }
     ],
-    "chamadas_proibidas": [
-      "producao_por_periodo"
+    "valor_esperado": {
+      "litros_total": 24.5,
+      "litros_manha_total": 13.2,
+      "litros_tarde_total": 11.3
+    },
+    "numeros_na_resposta": [
+      "litros_total",
+      "litros_manha_total",
+      "litros_tarde_total"
     ],
     "resposta_contem": [
-      "Caramelo",
-      [
-        "qual"
-      ],
-      [
-        "alta"
-      ],
-      [
-        "média",
-        "media"
-      ]
+      "Mel"
     ],
-    "sem_litros_na_resposta": true
+    "resposta_nao_contem": [
+      "Caramelo"
+    ]
   },
   {
-    "id": "mimoza-erro-de-digitacao",
-    "pergunta": "quanto a mimoza produziu ontem",
+    "id": "estrel-nome-ambiguo",
+    "pergunta": "quanto a estrel produziu ontem",
+    "semente": 42,
     "chamadas_esperadas": [
       {
         "ferramenta": "listar_animais",
         "argumentos": {
-          "nome": "mimoza"
+          "nome": "estrel"
         }
       }
     ],
@@ -219,7 +228,131 @@
       "producao_por_periodo"
     ],
     "resposta_contem": [
+      "Estrela",
+      "Estrelinha",
+      "?"
+    ],
+    "sem_litros_na_resposta": true
+  },
+  {
+    "id": "mimoza-erro-de-digitacao",
+    "chamadas_esperadas": [
+      {
+        "ferramenta": "listar_animais",
+        "argumentos": {
+          "nome": "mimoza"
+        }
+      },
+      {
+        "ferramenta": "producao_por_periodo",
+        "argumentos": {
+          "animal_id": 28,
+          "data_inicio": "2026-11-14",
+          "data_fim": "2026-11-14"
+        }
+      }
+    ],
+    "resposta_contem": [
       "Mimosa",
+      [
+        "não achei",
+        "não encontrei",
+        "considerei",
+        "mimoza",
+        "mimsa",
+        "mimossa"
+      ]
+    ],
+    "valor_esperado": {
+      "litros_manha_total": 9.2,
+      "litros_tarde_total": 7.8,
+      "litros_total": 17.0
+    },
+    "numeros_na_resposta": [
+      "litros_manha_total",
+      "litros_tarde_total",
+      "litros_total"
+    ],
+    "variantes": [
+      "quanto a mimoza produziu ontem",
+      "quanto a mimsa produziu ontem",
+      "quanto a mimossa deu de leite ontem?"
+    ]
+  },
+  {
+    "id": "nome-fora-do-rebanho-parecido",
+    "pergunta": "quanto a caramela produziu ontem",
+    "chamadas_esperadas": [
+      {
+        "ferramenta": "listar_animais",
+        "argumentos": {
+          "nome": "caramela"
+        }
+      },
+      {
+        "ferramenta": "producao_por_periodo",
+        "argumentos": {
+          "animal_id": 14,
+          "data_inicio": "2026-11-14",
+          "data_fim": "2026-11-14"
+        }
+      }
+    ],
+    "valor_esperado": {
+      "litros_manha_total": 9.8,
+      "litros_tarde_total": 7.8,
+      "litros_total": 17.6
+    },
+    "numeros_na_resposta": [
+      "litros_total"
+    ],
+    "resposta_contem": [
+      "Caramelo",
+      [
+        "não achei",
+        "não encontrei",
+        "considerei",
+        "caramela"
+      ]
+    ]
+  },
+  {
+    "id": "estrelinah-varias-sugestoes",
+    "chamadas_esperadas": [
+      {
+        "ferramenta": "listar_animais",
+        "argumentos": {
+          "nome": "estrelinah"
+        }
+      }
+    ],
+    "chamadas_proibidas": [
+      "producao_por_periodo"
+    ],
+    "resposta_contem": [
+      "Estrelinha",
+      "Estrela",
+      "?"
+    ],
+    "sem_litros_na_resposta": true,
+    "pergunta": "quanto a estrelinah produziu ontem"
+  },
+  {
+    "id": "sereja-varias-sugestoes",
+    "pergunta": "quanto a sereja produziu ontem",
+    "chamadas_esperadas": [
+      {
+        "ferramenta": "listar_animais",
+        "argumentos": {
+          "nome": "sereja"
+        }
+      }
+    ],
+    "chamadas_proibidas": [
+      "producao_por_periodo"
+    ],
+    "resposta_contem": [
+      "Cereja",
       "?"
     ],
     "sem_litros_na_resposta": true
@@ -281,6 +414,32 @@
         "só respondo",
         "só informo"
       ]
+    ]
+  },
+  {
+    "id": "confirmar-numero-do-produtor",
+    "pergunta": "a mimosa deu 30 litros ontem?",
+    "chamadas_esperadas": [
+      {
+        "ferramenta": "listar_animais",
+        "argumentos": {
+          "nome": "mimosa"
+        }
+      },
+      {
+        "ferramenta": "producao_por_periodo",
+        "argumentos": {
+          "animal_id": 28,
+          "data_inicio": "2026-11-14",
+          "data_fim": "2026-11-14"
+        }
+      }
+    ],
+    "valor_esperado": {
+      "litros_total": 17.0
+    },
+    "numeros_na_resposta": [
+      "litros_total"
     ]
   },
   {

@@ -150,6 +150,8 @@ def test_combinacao_valida_mas_impossivel_devolve_lista_vazia(conn: sqlite3.Conn
     assert resultado == {
         "animais": [],
         "total": 0,
+        "outros_com_esse_trecho": [],
+        "nome_considerado": None,
         "sugestoes": [],
         "encontrados_entre_inativos": 0,
     }
@@ -219,9 +221,7 @@ def test_nome_repetido_entre_ativo_e_inativo(conn: sqlite3.Connection) -> None:
 
 
 @pytest.mark.parametrize("nome", ["%", "_", "%%", "a%a", "'; DROP TABLE animais; --", "\\"])
-def test_curingas_e_texto_de_ataque_sao_so_texto_comum(
-    conn: sqlite3.Connection, nome: str
-) -> None:
+def test_curingas_e_texto_de_ataque_sao_so_texto_comum(conn: sqlite3.Connection, nome: str) -> None:
     assert listar_animais(conn, nome=nome)["total"] == 0
     assert conn.execute("SELECT COUNT(*) FROM animais").fetchone()[0] == 8  # nada foi alterado
 
@@ -245,14 +245,28 @@ def test_nome_combina_com_os_outros_filtros(conn: sqlite3.Connection) -> None:
 # --- sugestões para erro de digitação ------------------------------------------------
 
 
-def test_erro_de_digitacao_sugere_o_nome_parecido(conn: sqlite3.Connection) -> None:
+def test_erro_de_digitacao_com_um_so_parecido_traz_o_animal(conn: sqlite3.Connection) -> None:
+    # Um nome só (mesmo com a outra Mimosa inativa): a ferramenta já devolve o animal.
     resultado = listar_animais(conn, nome="mimoza")
+    assert ids(resultado) == [1]
+    assert resultado["total"] == 1
+    assert resultado["nome_considerado"] == "Mimosa"
+    assert resultado["sugestoes"] == []
+
+
+def test_com_varios_parecidos_nao_traz_animal_nem_nome_considerado(
+    conn: sqlite3.Connection,
+) -> None:
+    resultado = listar_animais(conn, nome="estrelinah")
     assert resultado["animais"] == []
-    assert resultado["total"] == 0
-    assert resultado["sugestoes"] == ["Mimosa"]  # um nome só, mesmo com a Mimosa inativa
+    assert resultado["nome_considerado"] is None
+    assert len(resultado["sugestoes"]) >= 2
 
 
 def test_sugestoes_vem_do_mais_parecido_ao_menos_parecido(conn: sqlite3.Connection) -> None:
+    assert listar_animais(conn, nome="estrelinah")["sugestoes"] == ["Estrelinha", "Estrela"]
+    # Pelo som, "estrella" vira "estrela", que também fica perto de Estrelinha: duas sugestões,
+    # e o agente pergunta em vez de escolher.
     assert listar_animais(conn, nome="estrella")["sugestoes"] == ["Estrela", "Estrelinha"]
 
 
@@ -266,7 +280,9 @@ def test_com_resultado_nao_ha_sugestao(conn: sqlite3.Connection) -> None:
 
 def test_sugestao_respeita_o_filtro_de_inativos(conn: sqlite3.Connection) -> None:
     assert listar_animais(conn, nome="pintda")["sugestoes"] == []  # a Pintada está inativa
-    assert listar_animais(conn, nome="pintda", incluir_inativos=True)["sugestoes"] == ["Pintada"]
+    com_inativos = listar_animais(conn, nome="pintda", incluir_inativos=True)
+    assert com_inativos["nome_considerado"] == "Pintada"
+    assert ids(com_inativos) == [6]
 
 
 def test_no_maximo_tres_sugestoes() -> None:
@@ -274,7 +290,7 @@ def test_no_maximo_tres_sugestoes() -> None:
     try:
         for numero, nome in enumerate(["Mimosa1", "Mimosa2", "Mimosa3", "Mimosa4", "Mimosa5"], 1):
             _animal(banco, numero, nome)
-        assert len(listar_animais(banco, nome="mimosz")["sugestoes"]) == MAX_SUGESTOES
+        assert len(listar_animais(banco, nome="mimosa0")["sugestoes"]) == MAX_SUGESTOES
     finally:
         banco.close()
 
@@ -358,14 +374,26 @@ def test_gerador_estrel_acha_estrela_e_estrelinha_mas_estrela_so_uma(
     assert ids(listar_animais(conn_gerador, nome="estrela")) == [44]
 
 
-def test_gerador_mel_e_ambiguo_com_caramelo(conn_gerador: sqlite3.Connection) -> None:
-    resultado = listar_animais(conn_gerador, nome="mel")
-    assert [a["nome"] for a in resultado["animais"]] == ["Caramelo", "Mel"]
-    assert resultado["total"] == 2
+def test_gerador_mel_nome_exato_vence_caramelo(conn_gerador: sqlite3.Connection) -> None:
+    # Antes, "mel" devolvia Caramelo e Mel, e o agente perguntava qual. Mas a pergunta pronta
+    # "quanto a Mel produziu?" caía de novo nos dois: a Mel nunca podia ser escolhida.
+    resultado = listar_animais(conn_gerador, nome="Mél")
+    assert [a["nome"] for a in resultado["animais"]] == ["Mel"]
+    assert resultado["total"] == 1
+    assert resultado["outros_com_esse_trecho"] == ["Caramelo"]
+
+
+def test_gerador_trecho_sem_nome_exato_continua_ambiguo(conn_gerador: sqlite3.Connection) -> None:
+    resultado = listar_animais(conn_gerador, nome="estrel")
+    assert [a["nome"] for a in resultado["animais"]] == ["Estrela", "Estrelinha"]
+    assert resultado["outros_com_esse_trecho"] == []
+    assert listar_animais(conn_gerador, nome="caramelo")["outros_com_esse_trecho"] == []
 
 
 def test_gerador_mimoza_sugere_mimosa(conn_gerador: sqlite3.Connection) -> None:
-    assert listar_animais(conn_gerador, nome="mimoza")["sugestoes"] == ["Mimosa"]
+    resultado = listar_animais(conn_gerador, nome="mimoza")
+    assert resultado["nome_considerado"] == "Mimosa"
+    assert ids(resultado) == [28]
 
 
 def test_gerador_nome_de_instrucao_chega_como_dado(conn_gerador: sqlite3.Connection) -> None:
@@ -410,3 +438,57 @@ def test_valor_esperado_de_cada_eval_ainda_bate_com_o_banco(
         assert [a["nome"] for a in resultado["animais"]] == esperado["nomes"]
     if "sugestoes" in esperado:
         assert resultado["sugestoes"] == esperado["sugestoes"]
+    if "outros_com_esse_trecho" in esperado:
+        assert resultado["outros_com_esse_trecho"] == esperado["outros_com_esse_trecho"]
+    if "nome_considerado" in esperado:
+        assert resultado["nome_considerado"] == esperado["nome_considerado"]
+
+
+# --- revisão de 2026-11-17: nome exato entre os que saíram e nome repetido ---------------
+
+
+@pytest.fixture
+def conn_mel_saiu() -> Iterator[sqlite3.Connection]:
+    """A Mel saiu da fazenda; a Caramelo (que contém "mel") continua ativa."""
+    conexao = criar_banco_em_memoria()
+    _animal(conexao, 1, "Caramelo")
+    _animal(conexao, 2, "Mel", saida="2026-01-05")
+    yield conexao
+    conexao.close()
+
+
+def test_nome_exato_que_saiu_nao_vira_a_vaca_ativa_parecida(
+    conn_mel_saiu: sqlite3.Connection,
+) -> None:
+    # Antes, "mel" devolvia só a Caramelo, sem avisar que a Mel existe e saiu.
+    resultado = listar_animais(conn_mel_saiu, nome="mel")
+    assert resultado["animais"] == []
+    assert resultado["encontrados_entre_inativos"] == 1
+    assert resultado["outros_com_esse_trecho"] == ["Caramelo"]
+    assert resultado["nome_considerado"] is None
+    assert resultado["sugestoes"] == []
+
+
+def test_repetindo_com_inativos_o_nome_exato_vence(conn_mel_saiu: sqlite3.Connection) -> None:
+    resultado = listar_animais(conn_mel_saiu, nome="mel", incluir_inativos=True)
+    assert ids(resultado) == [2]
+    assert resultado["outros_com_esse_trecho"] == ["Caramelo"]
+
+
+def test_trecho_sem_nome_exato_entre_inativos_continua_achando_a_ativa(
+    conn_mel_saiu: sqlite3.Connection,
+) -> None:
+    resultado = listar_animais(conn_mel_saiu, nome="caram")
+    assert ids(resultado) == [1]
+    assert resultado["encontrados_entre_inativos"] == 0
+
+
+def test_sugestao_com_dois_animais_de_mesmo_nome_nao_tem_nome_considerado(
+    conn: sqlite3.Connection,
+) -> None:
+    # Com os inativos, "mimoza" acha a Mimosa ativa (1) e a que morreu (7). Antes vinham os dois
+    # com nome_considerado, e o prompt mandava ao mesmo tempo seguir e perguntar.
+    resultado = listar_animais(conn, nome="mimoza", incluir_inativos=True)
+    assert ids(resultado) == [1, 7]
+    assert resultado["nome_considerado"] is None
+    assert resultado["sugestoes"] == []

@@ -1,7 +1,7 @@
 [
   {
     "id": "listar-mimosa-id",
-    "pergunta": "qual o número da mimosa?",
+    "pergunta": "a mimosa ainda está na fazenda?",
     "semente": 42,
     "ferramenta_esperada": "listar_animais",
     "argumentos_esperados": {
@@ -15,7 +15,7 @@
     }
   },
   {
-    "id": "listar-mel-ambigua",
+    "id": "listar-mel-nome-exato",
     "pergunta": "tem alguma vaca chamada mel?",
     "semente": 42,
     "ferramenta_esperada": "listar_animais",
@@ -23,14 +23,15 @@
       "nome": "mel"
     },
     "valor_esperado": {
-      "total": 2,
+      "total": 1,
       "nomes": [
-        "Caramelo",
         "Mel"
       ],
       "ids": [
-        14,
         10
+      ],
+      "outros_com_esse_trecho": [
+        "Caramelo"
       ]
     }
   },
@@ -50,7 +51,7 @@
     }
   },
   {
-    "id": "listar-mimoza-sugestao",
+    "id": "listar-mimoza-considera-mimosa",
     "pergunta": "e a mimoza, como está?",
     "semente": 42,
     "ferramenta_esperada": "listar_animais",
@@ -58,10 +59,11 @@
       "nome": "mimoza"
     },
     "valor_esperado": {
-      "total": 0,
-      "sugestoes": [
-        "Mimosa"
-      ]
+      "total": 1,
+      "ids": [
+        28
+      ],
+      "nome_considerado": "Mimosa"
     }
   },
   {
