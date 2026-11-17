@@ -28,3 +28,6 @@ a resposta do agente.
   diferir do dia atual se a coleta atrasar. Isso deve ser avisado na resposta do agente.
 - Banco sem nenhuma linha de produção não tem data de referência; as ferramentas devem
   tratar esse caso com um resultado vazio e claro.
+- A data de referência também é informada ao agente no prompt (ADR 0005), só para ele
+  interpretar "hoje", "ontem" e datas sem ano. Ele continua sem poder escolhê-la: ela não
+  aparece como parâmetro das ferramentas.
