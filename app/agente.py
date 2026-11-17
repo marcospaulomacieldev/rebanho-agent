@@ -8,9 +8,11 @@ como dado, e o modelo redige a resposta final (ADR 0001).
 import logging
 import sqlite3
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 
+from app.db.producao import data_de_referencia, data_minima
 from app.llm.client import (
     ChamadaFerramenta,
     ClienteLLM,
@@ -23,6 +25,15 @@ from app.tools.registro import declaracoes_neutras, executar_ferramenta
 logger = logging.getLogger(__name__)
 
 PASTA_PROMPTS = Path(__file__).resolve().parents[1] / "prompts"
+DIAS_DA_SEMANA = (
+    "segunda-feira",
+    "terça-feira",
+    "quarta-feira",
+    "quinta-feira",
+    "sexta-feira",
+    "sábado",
+    "domingo",
+)
 MAX_PASSOS = 5
 MAX_CHAMADAS_POR_PASSO = 10
 MAX_CARACTERES_PERGUNTA = 1000
@@ -52,8 +63,41 @@ class RespostaAgente:
 
 
 def carregar_prompt(nome: str = "sistema") -> str:
-    """Lê um prompt de `prompts/<nome>.md` (os prompts nunca ficam embutidos no código)."""
+    """Lê um prompt de `prompts/<nome>.md` (os prompts nunca ficam embutidos no código).
+
+    Devolve o modelo do prompt, com os marcadores `{{...}}` ainda por preencher. Para o
+    texto final, que leva as datas do banco, use `montar_prompt`.
+    """
     return (PASTA_PROMPTS / f"{nome}.md").read_text(encoding="utf-8")
+
+
+def _dia_e_data(texto: str | None) -> tuple[str, str, str]:
+    """(AAAA-MM-DD, dia/mês/ano, dia da semana) de uma data ISO; "sem registros" se nula."""
+    if texto is None:
+        return ("sem registros",) * 3
+    data = date.fromisoformat(texto)
+    return texto, data.strftime("%d/%m/%Y"), DIAS_DA_SEMANA[data.weekday()]
+
+
+def montar_prompt(conn: sqlite3.Connection, nome: str = "sistema") -> str:
+    """Prompt final: o modelo de `prompts/<nome>.md` com as datas dos dados preenchidas.
+
+    Os únicos valores que entram no texto são datas lidas do banco (a data de referência, o
+    dia mais recente com registro, e o primeiro dia). Nada digitado pelo usuário nem devolvido
+    por ferramenta é colocado no prompt de sistema (ADR 0005).
+    """
+    ultimo, ultimo_br, dia_da_semana = _dia_e_data(data_de_referencia(conn))
+    _, primeiro_br, _ = _dia_e_data(data_minima(conn))
+    valores = {
+        "ultimo_dia": ultimo,
+        "ultimo_dia_br": ultimo_br,
+        "dia_da_semana": dia_da_semana,
+        "primeiro_dia_br": primeiro_br,
+    }
+    texto = carregar_prompt(nome)
+    for chave, valor in valores.items():
+        texto = texto.replace("{{" + chave + "}}", valor)
+    return texto
 
 
 def _executar(
@@ -90,7 +134,7 @@ def responder(
     if len(pergunta) > MAX_CARACTERES_PERGUNTA:
         raise ValueError(f"A pergunta é longa demais (máximo de {MAX_CARACTERES_PERGUNTA} letras).")
 
-    instrucoes = prompt if prompt is not None else carregar_prompt()
+    instrucoes = prompt if prompt is not None else montar_prompt(conn)
     ferramentas = declaracoes_neutras()
     mensagens = [Mensagem(papel="usuario", texto=pergunta)]
     executadas: list[ChamadaExecutada] = []

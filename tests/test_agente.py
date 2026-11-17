@@ -1,5 +1,6 @@
 """Testes do laço do agente, com um cliente falso (sem rede e sem chave de API)."""
 
+import re
 import sqlite3
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
@@ -7,9 +8,15 @@ from typing import Any
 import pytest
 
 from app import agente
-from app.agente import MAX_PASSOS, MENSAGEM_SEM_RESPOSTA, carregar_prompt, responder
+from app.agente import (
+    MAX_PASSOS,
+    MENSAGEM_SEM_RESPOSTA,
+    carregar_prompt,
+    montar_prompt,
+    responder,
+)
 from app.db.connection import criar_banco_em_memoria
-from app.db.seed import gerar_dados, gravar_dados
+from app.db.seed import NOME_INSTRUCAO, gerar_dados, gravar_dados
 from app.llm.client import ChamadaFerramenta, Mensagem, RespostaLLM
 from app.tools.erros import ErroDeFerramenta
 from app.tools.registro import declaracoes_neutras, executar_ferramenta
@@ -63,7 +70,7 @@ def test_cliente_recebe_o_prompt_do_arquivo_e_as_ferramentas_do_registro(
     cliente = ClienteFalso([fala("ok")])
     responder("oi", conn, cliente)
     instrucoes, mensagens, ferramentas = cliente.recebido[0]
-    assert instrucoes == carregar_prompt()
+    assert instrucoes == montar_prompt(conn)  # o prompt do arquivo, com as datas do banco
     assert ferramentas == declaracoes_neutras()
     assert mensagens == [Mensagem(papel="usuario", texto="oi")]
 
@@ -215,11 +222,78 @@ def test_prompt_de_sistema_existe_e_traz_as_regras_principais() -> None:
     assert "ainda **não** consegue" in prompt  # admite os limites em vez de inventar
 
 
+def _secao_ainda_nao_consegue(prompt: str) -> str:
+    inicio = prompt.index("Você ainda **não** consegue")
+    return prompt[inicio : prompt.index("## Como achar o animal")]
+
+
 def test_prompt_nao_promete_o_que_as_ferramentas_ainda_nao_fazem() -> None:
     prompt = " ".join(carregar_prompt().split())
-    assert "pelo número de identificação" not in prompt  # não oferece consulta por animal
-    assert "semana passada" in prompt  # período passado está listado como limite
-    assert "número certo para a pergunta errada" in prompt
+    ainda_nao = _secao_ainda_nao_consegue(prompt)
+    assert "produzem menos" in ainda_nao  # animais_abaixo_da_media ainda não existe
+    assert "pelo número de identificação" not in prompt
+    assert "nunca deve pedi-lo" in prompt  # o produtor não conhece o id do animal
+
+
+def test_prompt_traz_as_regras_de_nome_data_e_sem_registro() -> None:
+    prompt = " ".join(carregar_prompt().split())
+    assert "sempre pergunte qual" in prompt  # nome que casa com mais de um animal
+    assert "Você quis dizer" in prompt  # nome com erro de digitação (sugestões)
+    assert "incluindo os que saíram da fazenda" in prompt  # tenta de novo com inativos
+    assert 'nunca "0 litros"' in prompt  # sem registro não é zero
+    assert "**manhã**" in prompt and "**tarde**" in prompt  # pergunta de um dia
+    assert "não seja depois" in prompt  # data sem ano
+    assert "diga as datas que usou" in prompt  # semana passada, mês passado
+
+
+def test_prompt_so_tem_marcadores_conhecidos() -> None:
+    marcadores = set(re.findall(r"\{\{(\w+)\}\}", carregar_prompt()))
+    assert marcadores == {"ultimo_dia", "ultimo_dia_br", "dia_da_semana", "primeiro_dia_br"}
+
+
+def test_montar_prompt_preenche_as_datas_do_banco(conn: sqlite3.Connection) -> None:
+    prompt = montar_prompt(conn)
+    assert "{{" not in prompt
+    assert "15/11/2026" in prompt  # o dia mais recente do banco do gerador
+    assert "domingo" in prompt  # 15/11/2026 caiu num domingo
+    assert "18/08/2026" in prompt  # o primeiro dia com registro
+    assert "2026-11-15" in prompt  # formato que as ferramentas esperam
+
+
+def test_montar_prompt_informa_o_dia_da_semana_certo() -> None:
+    banco = criar_banco_em_memoria()
+    try:
+        banco.execute(
+            "INSERT INTO animais (id, nome, sexo, raca, data_nascimento, status, lote, ativo)"
+            " VALUES (1, 'Mimosa', 'F', 'holandesa', '2020-03-10', 'lactacao', 'alta_producao', 1)"
+        )
+        banco.execute(
+            "INSERT INTO producao_leite (animal_id, data, litros_manha, litros_tarde)"
+            " VALUES (1, '2026-11-16', 10, 8)"
+        )
+        prompt = montar_prompt(banco)
+        assert "segunda-feira" in prompt
+        assert "16/11/2026" in prompt
+    finally:
+        banco.close()
+
+
+def test_montar_prompt_com_banco_sem_producao_nao_quebra() -> None:
+    banco = criar_banco_em_memoria()
+    try:
+        prompt = montar_prompt(banco)
+        assert "sem registros" in prompt
+        assert "{{" not in prompt
+    finally:
+        banco.close()
+
+
+def test_montar_prompt_nunca_leva_texto_dos_dados_como_o_nome_de_um_animal(
+    conn: sqlite3.Connection,
+) -> None:
+    # O prompt de sistema só recebe datas. Nomes de animais (que podem parecer instruções)
+    # chegam ao modelo apenas como resultado de ferramenta.
+    assert NOME_INSTRUCAO not in montar_prompt(conn)
 
 
 def test_mais_chamadas_que_o_limite_no_mesmo_passo_so_executam_as_primeiras(
