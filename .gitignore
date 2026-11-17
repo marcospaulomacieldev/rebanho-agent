@@ -17,6 +17,7 @@ venv/
 
 # Dados gerados
 data/
+evals/resultados/
 *.db
 
 # Editores / SO

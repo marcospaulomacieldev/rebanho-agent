@@ -27,6 +27,7 @@ include = ["app*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]  # deixa os testes importarem o pacote `evals`, que não é instalado
 
 [tool.ruff]
 line-length = 100

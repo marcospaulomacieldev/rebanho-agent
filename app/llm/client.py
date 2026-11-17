@@ -30,7 +30,18 @@ class ErroLLM(RuntimeError):
     A mensagem é segura para mostrar ao usuário e nunca contém a chave da API: ela é montada
     só com textos fixos e com o código e o status do erro, nunca com o texto que o provedor
     ou a biblioteca de rede devolveram.
+
+    `codigo` é o código HTTP do provedor, quando houve um (por exemplo, 429 para limite de
+    requisições); quem chama pode usá-lo para decidir se vale tentar de novo.
     """
+
+    def __init__(self, mensagem: str, codigo: int | None = None) -> None:
+        super().__init__(mensagem)
+        self.codigo = codigo
+
+
+class ErroDeConexao(ErroLLM):
+    """Não foi possível falar com o provedor (rede fora do ar, tempo esgotado, falha do SDK)."""
 
 
 @dataclass(frozen=True)
@@ -166,9 +177,12 @@ class ClienteGemini:
             )
         except errors.APIError as erro:
             status = f", {erro.status}" if getattr(erro, "status", None) else ""
-            raise ErroLLM(f"O provedor recusou a chamada (código {erro.code}{status}).") from erro
-        except Exception as erro:  # rede fora do ar, tempo esgotado, falha do SDK...
+            codigo = erro.code if isinstance(erro.code, int) else None
             raise ErroLLM(
+                f"O provedor recusou a chamada (código {erro.code}{status}).", codigo=codigo
+            ) from erro
+        except Exception as erro:  # rede fora do ar, tempo esgotado, falha do SDK...
+            raise ErroDeConexao(
                 "Não consegui falar com o provedor do modelo. Verifique a conexão e tente de novo."
             ) from erro
 
