@@ -164,6 +164,121 @@ Serve de memória do projeto: decisões, erros e aprendizados.
   perguntas. 543 testes passando e 6 pulados (casos sem chamada esperada).
 - A amostra de 14 execuções foi medida **antes** desses ajustes de prompt, de ferramenta e de
   casos; não vale para a versão atual.
-- Pendente: rodada completa das evals (28 casos) sobre um commit limpo; investigar a latência; `animais_abaixo_da_media`; README; reconferir com o modelo real o prompt novo, a recusa do assunto estranho em
+- **Primeira rodada completa das evals** (commit `3529001`, `gemini-3.5-flash-lite`, 28 casos,
+  35 perguntas, **uma repetição por pergunta**, nenhuma falha de infraestrutura): 31/35
+  execuções aprovadas. Ferramenta correta 31/32, argumentos equivalentes 27/28 (idênticos
+  23/28), números 19/19, fidelidade numérica 35/35, comportamento 11/14, consistência entre
+  variantes 5/5 casos. Latência do modelo: mediana 3,6 s, percentil 90 de 11,5 s (a amostra
+  anterior teve 14,9 s de mediana; a causa da diferença não foi investigada). Com uma
+  repetição, as taxas ainda são indícios.
+- As 4 falhas: um caso mal escrito por mim (`listar-mimosa-id` pedia o número do animal, que o
+  prompt proíbe mostrar); o pedido misto ignorou a parte fora do assunto, como nos testes
+  manuais; no erro de digitação o agente seguiu com "Mimosa" em vez de perguntar; no nome
+  ambíguo perguntou certo, mas sem fase nem lote.
+- Ajustes depois da rodada (ainda não medidos com o modelo): erro de digitação com uma só
+  sugestão segue com ela e avisa, com mais de uma pergunta; nome ambíguo cita a fase e o lote
+  só se ajudar;
+- **Busca por nome generalizada.** O primeiro limiar (0,82) tinha sido escolhido com 22
+  exemplos meus; o dono do projeto apontou que isso não generalizava. Criei uma medição sem
+  modelo (`python -m evals.busca_por_nome`): erros gerados para todos os animais e 40 nomes
+  que não existem no rebanho. Na primeira versão do gerador (199 erros), só a comparação de
+  letras perdia 27 erros, quase todos de troca de som ("sereja" para Cereja) e de letras trocadas. A busca
+  passou a comparar também pelo som e a aceitar uma letra de distância (nomes de 4 letras ou
+  mais). Na semente 42, com erros no meio e nas pontas da palavra: 342 de 347 erros chegam ao
+  animal certo, nenhum vira sugestão única errada, e 4 dos 40 nomes inexistentes viram outra
+  vaca (risco aceito, com aviso na resposta). A regra foi escolhida olhando a semente 42; nas
+  sementes 1, 7 e 2024, não usadas na escolha, também não houve nenhuma sugestão única errada,
+  e de 3 a 4 nomes inexistentes foram assumidos. As metas viraram
+  testes (`tests/test_busca_por_nome.py`), e o teste novo pegou o animal de nome-instrução
+  aparecendo como sugestão de "Dita", corrigido. Os casos de eval de erro de digitação ganharam
+  variantes ("mimoza", "mimsa", "mimossa"), um nome inexistente ("caramela") e dois casos de
+  várias sugestões ("estrelinah", "sereja"): 31 casos e 40 perguntas.
+- **Rodada dirigida das evals (2026-11-17)**, com mudanças não commitadas sobre `3529001`, 7
+  casos, 27 execuções, 3 repetições: os casos corrigidos passaram em todas (erro de digitação
+  em três grafias 9/9, nome ambíguo 3/3, caso reescrito 3/3). Dois problemas novos: com mais de
+  uma sugestão de nome, o agente assumiu a primeira (1 de 6 certas); e no pedido misto ele
+  **inventou números** nas três repetições (44.408, 125.805 e 210.669 L, sem chamar ferramenta;
+  o real é 19.639,6 L). A checagem de fidelidade numérica pegou as três. Primeira hipótese: o
+  exemplo do prompt terminava em "o rebanho produziu...", e o modelo completaria a frase. O
+  exemplo foi retirado, entrou a regra "nunca escreva litros sem ter chamado a ferramenta nesta
+  resposta", e quem decide entre uma sugestão de nome e várias passou a ser a ferramenta
+  (`nome_considerado`), e não o modelo.
+- **Segunda rodada dirigida (2026-11-17)**, mesmos 7 casos, 27 execuções: 24 aprovadas. Os
+  erros de digitação ficaram resolvidos (estrelinah 3/3, sereja 3/3, caramela 3/3, mimoza 9/9;
+  comportamento 24/24; 63 chamadas ao modelo, contra 79). O pedido misto continuou 0/3,
+  inventando (136.216, 42.138 e 136.002 L): **a hipótese do exemplo estava errada.**
+- **Trava de fidelidade numérica (ADR 0008).** A regra "todo número vem de uma ferramenta" saiu
+  só do prompt e foi para o código: o laço do agente não entrega litros que não vieram de uma
+  ferramenta daquela pergunta. Na primeira vez pede correção ao modelo
+  (`prompts/correcao_litros.md`); se ele insistir, a pessoa recebe uma mensagem sem números. A
+  definição é a mesma das evals e agora mora em `app/fidelidade.py`. Aplicada às 103 respostas
+  reais salvas, dispara só nas 6 invenções. O relatório das evals ganhou a linha "Trava de
+  litros sem origem", para a trava não esconder a falha do modelo. A regra do pedido misto
+  também foi reescrita (primeiro a ferramenta, depois o texto), com base numa segunda hipótese
+  ainda não verificada. Nada disso foi medido com o modelo real ainda.
+- **Rodadas depois da trava (2026-11-17).** Pedido misto isolado: 3/3, sem a trava agir (a
+  reordenação do prompt resolveu; a trava fica como rede de segurança). Rodada completa, 3
+  repetições: 89 de 92 execuções válidas aprovadas; ferramenta 83/83, números 53/53,
+  fidelidade 92/92, consistência entre variantes 6/6, comportamento 54/57. Interrompida no fim
+  pelo limite de uso (6 não executadas; `listar-mimoza-considera-mimosa` não rodou). A trava
+  agiu 1 vez (`rebanho-ultima-semana`, aprovada depois), mas o texto barrado não era guardado.
+- **Nome exato vence (revisão do ADR 0005).** As 3 falhas eram todas de "quanto a mel
+  produziu ontem": o agente respondeu sobre a Mel em vez de perguntar. A regra estava errada:
+  "mel" é trecho de "Caramelo", e a pergunta pronta "quanto a Mel produziu?" caía de novo nos
+  dois, então a Mel nunca podia ser escolhida. Agora a ferramenta devolve só o nome exato e põe
+  os outros em `outros_com_esse_trecho`; a ambiguidade real é medida por "estrel". Também: a
+  trava guarda o texto barrado (`RespostaAgente.barradas`), e o relatório das evals o mostra,
+  para distinguir invenção, arredondamento e falso positivo. Ainda não medido com o modelo.
+- **Rodada com versões misturadas (2026-11-17, 11:06).** Uma rodada começou enquanto as
+  mudanças acima eram aplicadas: os casos e a ferramenta vieram da versão antiga (ids antigos,
+  "mel" ainda devolvendo dois animais), mas o relatório registrou o hash do prompt novo, porque
+  o executor lia a versão no **fim** da rodada. Os resultados dela não valem para nenhuma das
+  duas versões. Corrigido: `evals/run.py` lê a versão (prompt, arquivos alterados e o conteúdo
+  deles) antes da rodada, confere de novo no fim, e o relatório avisa se ela mudou no meio.
+  (O caso antigo do "mel" passou 3/3 aqui e 0/3 na rodada completa, mas não dá para comparar:
+  o prompt pode ter mudado no meio desta rodada, porque ele é lido a cada pergunta.)
+- **Rodada do nome exato (2026-11-17, 11:22)**, 9 execuções: `estrel-nome-ambiguo` 3/3 e
+  `listar-mel-nome-exato` 3/3; `mel-nome-exato-vence` 2/3, com a Mel escolhida nas três. A
+  falha foi de data: "ontem" virou 15/11 (o "hoje" dos dados) em vez de 14/11. Nos relatórios
+  salvos até essa rodada, foi 1 erro em 51 execuções (recorte: perguntas com "ontem" que
+  chamaram a ferramenta de produção, sem a rodada com versões misturadas). Correção: o prompt passou a trazer "hoje",
+  "ontem" e "anteontem" já calculados a partir do banco, para o modelo só copiar a data.
+- **Medição das datas prontas (2026-11-17, 11:43)**: `mimosa-ontem` 6/6, `mel-nome-exato-vence`
+  3/3 e `mimoza-erro-de-digitacao` 7/7 (2 não executadas por falha de conexão); 16 de 16
+  válidas aprovadas, trava sem agir, sem aviso de versão misturada. Latência mediana de 19 s,
+  bem acima dos 3,3 s da rodada completa: a investigar.
+- **Revisão de código (2026-11-17): aprovado com ressalvas, 9 achados, todos corrigidos.**
+  Os de comportamento: (1) o executor das evals quebrava no Windows com diff contendo "Á", "Í"
+  ou aspas curvas (a saída do git era lida em cp1252), agora lida em UTF-8, com teste num
+  repositório temporário; (2) nome exato só entre os inativos virava a vaca ativa parecida sem
+  aviso; (3) sugestão com dois animais do mesmo nome trazia `nome_considerado` e os dois
+  juntos; (4) a trava aceitava qualquer número da pergunta ("7 dias" liberava "7 litros") e a
+  checagem das evals usava outra definição. Agora a definição é uma só, e a fidelidade das
+  evals olha também o texto barrado, para não dar 100% só porque a trava segurou. Também:
+  ADR 0008 com o que foi medido depois da trava (incluindo o disparo não explicado em
+  `rebanho-ultima-semana`); números do ADR 0005 datados por versão do gerador; testes que
+  diziam mais do que testavam (um deles olhava `sugestoes`, que no contrato novo nunca tem um
+  nome só, e passava sem testar nada); hash da versão gravado no relatório.
+- **Achado em aberto (não corrigido):** nome inexistente que é trecho de outro animal vira
+  esse animal sem aviso. "Ana" acha a Cigana como achado direto, e o agente responderia sobre
+  a Cigana. É o mesmo mecanismo do "mel" em "Caramelo", mas sem nome exato para vencer.
+- **Segunda revisão de código (2026-11-17): aprovado com ressalvas, sem bloqueio; 6 ajustes
+  feitos.** A fidelidade das evals passou a contar qualquer texto barrado como falha direto
+  (recalcular contra resultados que chegaram depois poderia esconder uma invenção que
+  coincidisse com o valor real); o rótulo do relatório ficou neutro ("Execuções em que a trava
+  de litros barrou uma resposta"); o registro da versão aceita nomes de arquivo com acento
+  (`ls-files -z`) e grava hash nulo, com aviso, se o git falhar; o recorte do "1 em 51" e as
+  versões do gerador (199 e 194 erros) ficaram explícitos. Limite registrado no ADR 0008: a
+  trava aceita litros que o produtor escreveu na pergunta, então "a Mimosa deu 30 litros
+  ontem?" pode ser confirmado sem consulta; o caso `confirmar-numero-do-produtor` mede isso.
+- **Rodada de conferência antes do commit (2026-11-17, 12:47)**, 6 casos, 30 execuções, 3
+  repetições: 30/30 aprovadas (ferramenta 27/27, números 27/27, fidelidade 30/30,
+  comportamento 18/18); `confirmar-numero-do-produtor` 3/3, consultando o banco; trava sem
+  barrar nada; sem aviso de versão mudada. Latência mediana de 17,5 s (percentil 90 de 42,7 s),
+  ainda bem acima dos 3,3 s da rodada completa da madrugada: continua a investigar.
+- Também: a regra do pedido misto foi para a seção
+  "Fora do assunto", com exemplo; o caso `listar-mimosa-id` virou "a mimosa ainda está na
+  fazenda?"; caso novo com várias sugestões (`estrelinah`). Revisão registrada no ADR 0005.
+- Pendente: nova rodada dos casos afetados; investigar a latência; `animais_abaixo_da_media`; README; reconferir com o modelo real o prompt novo, a recusa do assunto estranho em
   pedido misto (teste 16) e o "sim" solto (teste 14). Antes do Docker: incluir `schema.sql`
   como `package-data` no `pyproject.toml`, senão o arquivo não vai na instalação não editável.

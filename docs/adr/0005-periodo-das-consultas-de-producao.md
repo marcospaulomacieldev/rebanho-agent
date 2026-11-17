@@ -132,6 +132,100 @@ mudar e eles deixarem de valer.
 2. `listar_animais` entra antes de `animais_abaixo_da_media` no cronograma.
 3. Conversa com histórico: fica para depois das evals, que vão mostrar se ela faz falta.
 
+## Revisão (2026-11-16, depois da primeira rodada das evals)
+A rodada sobre o commit `3529001` (35 execuções, uma por pergunta) mostrou dois problemas nas
+regras de nome. As linhas "Nome ambíguo" e "Nome com erro de digitação" da tabela acima ficam
+substituídas por:
+- **Erro de digitação com uma só sugestão:** o agente segue com o nome sugerido e avisa no
+  começo da resposta ("Não achei 'mimoza'; considerei a Mimosa."). Motivo: sem memória de
+  conversa, a resposta "sim" do produtor a "Você quis dizer?" chega sem contexto e não serve
+  para nada. Com **mais de uma** sugestão, o agente continua perguntando, sem consultar a
+  produção.
+- **Quando um nome vira sugestão.** Com a regra acima, uma sugestão fraca faria o agente
+  responder sobre a vaca errada, então a comparação foi refeita e medida de forma sistemática
+  (`evals/busca_por_nome.py`): um erro de cada tipo para todos os animais ativos da semente 42
+  (letra faltando, letras trocadas de lugar, letra dobrada, troca de som, h inicial) e 40
+  nomes de vaca que não existem no rebanho. O gerador de erros mudou durante o trabalho, então
+  os totais abaixo não são todos comparáveis: a primeira versão (2026-11-16) gerava 199 erros, a
+  segunda 194 (com a regra final, 188 chegavam ao animal certo), e a atual (2026-11-17), que
+  também erra no começo e no fim da palavra, gera 347. Só os números da versão atual são
+  reproduzíveis com `python -m evals.busca_por_nome`.
+  - Regra adotada: semelhança de pelo menos 0,82 pela escrita **ou pelo som** (ç, ss, z e s; ch
+    e x; lh e li; letras dobradas), ou estar a **uma letra** de distância do nome inteiro
+    (duas letras trocadas de lugar contam como uma), para textos de 4 letras ou mais.
+  - Resultado na semente 42, versão atual do gerador (347 erros): 342
+    chegam ao animal certo (52 direto, 259 com uma sugestão, 31 com várias, e o agente
+    pergunta), 4 ficam sem resultado (nomes de 3 letras, como "mil" para Mel), 1 cai em outro
+    animal que existe com aquele nome exato ("lua" para Luna) e nenhum vira uma sugestão única
+    errada.
+  - **A regra foi escolhida olhando esta medição na semente 42**, e as metas dos testes são os
+    valores observados nela. Para não confundir ajuste com generalização, a mesma medição foi
+    repetida nas sementes 1, 7 e 2024 (outros conjuntos de nomes, não usados na escolha):
+    nenhuma sugestão única errada em nenhuma delas, de 3 a 4 erros sem resultado e de 3 a 4 dos
+    40 nomes inexistentes assumidos (entre eles "Dita" -> Chita e "Rosa" -> Romã, quando essas
+    vacas não existem). Essas duas metas de segurança rodam nos testes para as quatro sementes.
+  - A meta de no máximo 4 nomes inexistentes assumidos está **na borda**: dá exatamente 4 nas
+    sementes 42, 7 e 2024, e 5 na semente 3, que não está nos testes (achado da revisão de
+    2026-11-17). Ela não foi afrouxada para passar; um nome novo no gerador pode quebrá-la, e
+    então é preciso decidir de novo, não só mudar o número.
+  - Comparativo: o limiar antigo de 0,6 deixava o animal de nome-instrução aparecer como
+    sugestão; 0,82 só pela escrita deixava 27 de 199 erros sem resultado (primeira versão do
+    gerador), quase todos de troca
+    de som e de letras trocadas, que são os erros de quem escreve como fala.
+  - Risco que não tem solução pela semelhança: 4 dos 40 nomes inexistentes viram outra vaca
+    ("Caramela" -> Caramelo, "Malhadinha" -> Malhada, "Serenata" -> Serena, "Estrelada" ->
+    Estrela), porque estão tão perto quanto um erro de digitação. O aviso "considerei a
+    Caramelo" na primeira frase é a proteção; o dono do projeto aceitou esse risco (opção (a),
+    2026-11-16). Exigir 4 letras evita que a maioria dos nomes curtos inexistentes vire outra
+    vaca ("Lia" viraria Lua, "Eva" viraria Uva), mas não todos: com 4 letras, "Luna" vira Lua
+    na semente 3 e "Dita" vira Chita na semente 7.
+  - A regra de uma letra vale só para o nome inteiro: aplicada a cada palavra, "Dita" casaria
+    com o "diga" do animal de nome-instrução.
+  - As metas estão em `tests/test_busca_por_nome.py`: nenhuma sugestão única errada, pelo menos
+    95% dos erros chegando ao animal certo e no máximo 4 nomes inexistentes assumidos.
+- **Quem decide entre uma sugestão e várias (2026-11-17):** a rodada dirigida das evals (27
+  execuções, 3 repetições) mostrou que o modelo não respeita essa distância: com duas ou três
+  sugestões, ele assumiu a primeira em 5 de 6 execuções. A decisão passou para a ferramenta:
+  com um só nome parecido, `listar_animais` já devolve o animal e o nome em
+  `nome_considerado`; com mais de um, devolve só `sugestoes`, sem nenhum animal (e, portanto,
+  sem id para o modelo consultar por conta própria).
+- **Nome ambíguo:** o agente cita o nome de cada animal e, se ajudar a diferenciar, a fase e o
+  lote. Quem conhece as vacas pelo nome não precisa do lote para escolher entre Mel e Caramelo.
+
+## Revisão (2026-11-17): nome exato vence
+A decisão 1 de 2026-11-16 ("sempre pergunta qual, sem atalho para nome exato") foi revertida
+pelo dono do projeto. Na rodada completa das evals (92 execuções válidas, 3 repetições), o
+caso "quanto a mel produziu ontem" falhou 3 de 3: o agente respondeu sobre a Mel em vez de
+perguntar. A análise mostrou que o defeito estava na regra, e não no agente: "mel" é trecho de
+"Caramelo", então a pergunta pronta que o agente sugeria ("quanto a Mel produziu ontem?") caía
+de novo nos dois animais. **Pela regra antiga, a Mel nunca podia ser escolhida pelo nome.**
+
+Regra nova, aplicada na ferramenta (e não no prompt, pela mesma lição da revisão anterior):
+- se o texto digitado, sem acento e sem diferença de maiúscula, for exatamente o nome de algum
+  animal, `listar_animais` devolve só os de nome exato em `animais`; os outros que contêm o
+  trecho vão em `outros_com_esse_trecho`, só como informação;
+- sem nome exato, nada muda: "estrel" devolve Estrela e Estrelinha, e o agente pergunta qual;
+- dois animais de nome exato (por exemplo, uma Mimosa ativa e outra que saiu, com
+  `incluir_inativos`) continuam voltando juntos, e o agente pergunta.
+
+Na semente 42, "mel" é o único nome ativo que também é trecho de outro, então a regra só muda
+esse caso. O caso de eval `mel-nome-ambiguo` virou `mel-nome-exato-vence`, e a ambiguidade
+real passou a ser medida por `estrel-nome-ambiguo`.
+
+Ajustes da revisão de código (2026-11-17), cobertos por testes com bancos montados à mão,
+porque nenhum dos dois acontece no banco da semente 42:
+- **Nome exato só entre os que saíram:** se a Mel tivesse saído e a Caramelo estivesse ativa,
+  "mel" devolveria só a Caramelo, sem aviso. Agora a ferramenta não devolve animal nenhum,
+  informa `encontrados_entre_inativos` e põe a Caramelo em `outros_com_esse_trecho`; repetindo
+  com `incluir_inativos`, o nome exato vence e vem a Mel.
+- **Sugestão com dois animais do mesmo nome:** com `incluir_inativos`, "mimoza" achava a
+  Mimosa ativa e a que saiu e devolvia as duas com `nome_considerado`, e o prompt mandava ao
+  mesmo tempo seguir e perguntar. Agora `nome_considerado` só vem quando há um único animal.
+
+Custo: quem digitar "mel" querendo a Caramelo recebe a Mel. Como o nome da vaca é a forma de
+o produtor chamá-la, esse uso é improvável; o campo `outros_com_esse_trecho` fica no resultado
+caso o modelo precise dele.
+
 ## Termos
 - **Parâmetros mutuamente exclusivos:** dois modos que não podem ser usados juntos; a
   ferramenta recusa a combinação.
