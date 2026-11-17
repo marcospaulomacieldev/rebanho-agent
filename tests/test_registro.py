@@ -9,7 +9,6 @@ import pytest
 
 from app.db.connection import criar_banco_em_memoria
 from app.db.seed import gerar_dados, gravar_dados
-from app.tools.producao import producao_por_periodo
 from app.tools.registro import FERRAMENTAS, REGISTRO, declaracoes_neutras, executar_ferramenta
 
 
@@ -38,8 +37,11 @@ def test_declaracoes_neutras_sao_serializaveis_e_completas() -> None:
 
 def test_esquema_de_producao_por_periodo() -> None:
     parametros = REGISTRO["producao_por_periodo"].parametros
-    assert parametros["required"] == ["dias"]
-    assert set(parametros["properties"]) == {"dias", "animal_id"}
+    assert parametros["required"] == []  # os dois modos de período são opcionais (ADR 0005)
+    assert set(parametros["properties"]) == {"dias", "data_inicio", "data_fim", "animal_id"}
+    assert parametros["properties"]["data_inicio"]["type"] == "string"
+    assert parametros["properties"]["data_fim"]["type"] == "string"
+    assert "AAAA-MM-DD" in parametros["properties"]["data_inicio"]["description"]
 
 
 def test_esquema_nao_expoe_a_data_de_referencia_ao_modelo() -> None:
@@ -48,21 +50,41 @@ def test_esquema_nao_expoe_a_data_de_referencia_ao_modelo() -> None:
     assert "data_referencia" not in texto
 
 
-def test_esquema_acompanha_a_assinatura_da_funcao() -> None:
+@pytest.mark.parametrize("nome", sorted(REGISTRO))
+def test_esquema_acompanha_a_assinatura_da_funcao(nome: str) -> None:
     # Se alguém mudar a função e esquecer o esquema (ou o contrário), este teste avisa.
-    assinatura = inspect.signature(producao_por_periodo)
+    ferramenta = REGISTRO[nome]
+    assinatura = inspect.signature(ferramenta.funcao)
     do_modelo = {
-        nome
-        for nome, parametro in assinatura.parameters.items()
-        if nome != "conn" and parametro.kind is not inspect.Parameter.KEYWORD_ONLY
+        parametro
+        for parametro, definicao in assinatura.parameters.items()
+        if parametro != "conn" and definicao.kind is not inspect.Parameter.KEYWORD_ONLY
     }
-    assert do_modelo == set(REGISTRO["producao_por_periodo"].parametros["properties"])
+    assert do_modelo == set(ferramenta.parametros["properties"])
 
 
-def test_descricao_diz_quando_usar_e_quando_nao_usar() -> None:
-    descricao = REGISTRO["producao_por_periodo"].descricao
+@pytest.mark.parametrize("nome", sorted(REGISTRO))
+def test_descricao_diz_quando_usar_e_quando_nao_usar(nome: str) -> None:
+    descricao = REGISTRO[nome].descricao
     assert "USE" in descricao
     assert "NÃO USE" in descricao
+
+
+def test_cada_ferramenta_citada_na_descricao_de_outra_existe() -> None:
+    # As descrições se referem umas às outras pelo nome (por exemplo, "use listar_animais").
+    for ferramenta in FERRAMENTAS:
+        for outra in ("listar_animais", "producao_por_periodo"):
+            if outra in ferramenta.descricao:
+                assert outra in REGISTRO
+
+
+def test_listar_animais_esta_no_registro_com_as_listas_fechadas_no_esquema() -> None:
+    propriedades = REGISTRO["listar_animais"].parametros["properties"]
+    assert set(propriedades) == {"status", "lote", "nome", "incluir_inativos"}
+    assert propriedades["status"]["enum"] == ["lactacao", "seca", "novilha", "corte"]
+    assert "pre_parto" in propriedades["lote"]["enum"]
+    assert propriedades["incluir_inativos"]["type"] == "boolean"
+    assert REGISTRO["listar_animais"].parametros["required"] == []
 
 
 def test_executar_ferramenta_devolve_o_resultado(conn: sqlite3.Connection) -> None:
@@ -87,16 +109,34 @@ def test_argumento_desconhecido_e_erro_claro(conn: sqlite3.Connection) -> None:
         executar_ferramenta(conn, "producao_por_periodo", {"dias": 7, "sql": "DROP TABLE x"})
 
 
-def test_argumento_obrigatorio_ausente_e_erro_claro(conn: sqlite3.Connection) -> None:
-    with pytest.raises(ValueError, match="obrigatórios ausentes.*dias"):
+def test_sem_nenhum_periodo_a_ferramenta_pede_o_periodo(conn: sqlite3.Connection) -> None:
+    with pytest.raises(ValueError, match="Informe `dias`"):
         executar_ferramenta(conn, "producao_por_periodo", {})
 
 
 def test_argumentos_nulos_valem_como_nenhum_argumento(conn: sqlite3.Connection) -> None:
     # Alguns provedores enviam a chamada sem objeto de argumentos; o erro esperado aqui é o
-    # de argumento obrigatório ausente, e não um TypeError.
-    with pytest.raises(ValueError, match="obrigatórios ausentes.*dias"):
+    # de falta de período, e não um TypeError.
+    with pytest.raises(ValueError, match="Informe `dias`"):
         executar_ferramenta(conn, "producao_por_periodo", None)
+
+
+def test_chamada_por_datas_como_o_modelo_envia_com_nulos_nos_parametros_omitidos(
+    conn: sqlite3.Connection,
+) -> None:
+    # O Gemini costuma enviar null (ou texto vazio) nos parâmetros opcionais que omite.
+    argumentos = {
+        "dias": None,
+        "data_inicio": "2026-11-10",
+        "data_fim": "2026-11-10",
+        "animal_id": None,
+    }
+    resultado = executar_ferramenta(conn, "producao_por_periodo", argumentos)
+    assert resultado["dias_com_registro"] == 1
+    assert resultado["data_inicio"] == resultado["data_fim"] == "2026-11-10"
+    assert resultado["litros_total"] == pytest.approx(
+        resultado["litros_manha_total"] + resultado["litros_tarde_total"], abs=0.05
+    )
 
 
 @pytest.mark.parametrize("argumentos", [[7], "dias=7", 7, {1: 2}])

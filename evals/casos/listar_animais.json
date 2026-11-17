@@ -1,0 +1,119 @@
+[
+  {
+    "id": "listar-mimosa-id",
+    "pergunta": "qual o número da mimosa?",
+    "semente": 42,
+    "ferramenta_esperada": "listar_animais",
+    "argumentos_esperados": {
+      "nome": "mimosa"
+    },
+    "valor_esperado": {
+      "total": 1,
+      "ids": [
+        28
+      ]
+    }
+  },
+  {
+    "id": "listar-mel-ambigua",
+    "pergunta": "tem alguma vaca chamada mel?",
+    "semente": 42,
+    "ferramenta_esperada": "listar_animais",
+    "argumentos_esperados": {
+      "nome": "mel"
+    },
+    "valor_esperado": {
+      "total": 2,
+      "nomes": [
+        "Caramelo",
+        "Mel"
+      ],
+      "ids": [
+        14,
+        10
+      ]
+    }
+  },
+  {
+    "id": "listar-estrela-uma-so",
+    "pergunta": "cadê a estrela?",
+    "semente": 42,
+    "ferramenta_esperada": "listar_animais",
+    "argumentos_esperados": {
+      "nome": "estrela"
+    },
+    "valor_esperado": {
+      "total": 1,
+      "ids": [
+        44
+      ]
+    }
+  },
+  {
+    "id": "listar-mimoza-sugestao",
+    "pergunta": "e a mimoza, como está?",
+    "semente": 42,
+    "ferramenta_esperada": "listar_animais",
+    "argumentos_esperados": {
+      "nome": "mimoza"
+    },
+    "valor_esperado": {
+      "total": 0,
+      "sugestoes": [
+        "Mimosa"
+      ]
+    }
+  },
+  {
+    "id": "listar-dona-inativa",
+    "pergunta": "a dona foi vendida?",
+    "semente": 42,
+    "ferramenta_esperada": "listar_animais",
+    "argumentos_esperados": {
+      "nome": "dona",
+      "incluir_inativos": true
+    },
+    "valor_esperado": {
+      "total": 1,
+      "nomes": [
+        "Dona"
+      ],
+      "ids": [
+        56
+      ]
+    }
+  },
+  {
+    "id": "listar-acucena-sem-acento",
+    "pergunta": "me fala da acucena",
+    "semente": 42,
+    "ferramenta_esperada": "listar_animais",
+    "argumentos_esperados": {
+      "nome": "acucena"
+    },
+    "valor_esperado": {
+      "total": 1,
+      "nomes": [
+        "Açucena"
+      ],
+      "ids": [
+        34
+      ]
+    }
+  },
+  {
+    "id": "listar-vacas-secas",
+    "pergunta": "quantas vacas estão secas?",
+    "semente": 42,
+    "ferramenta_esperada": "listar_animais",
+    "argumentos_esperados": {
+      "status": "seca"
+    },
+    "valor_esperado": {
+      "total": 8
+    },
+    "numeros_na_resposta": [
+      "total"
+    ]
+  }
+]

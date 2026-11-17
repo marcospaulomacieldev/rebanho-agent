@@ -4,15 +4,69 @@
     "pergunta": "Qual foi a produção total do rebanho nos últimos 7 dias?",
     "semente": 42,
     "ferramenta_esperada": "producao_por_periodo",
-    "argumentos_esperados": {"dias": 7},
-    "valor_esperado": {"litros_total": 4479.1, "dias_com_registro": 7}
+    "argumentos_esperados": {
+      "dias": 7
+    },
+    "valor_esperado": {
+      "litros_total": 4479.1,
+      "dias_com_registro": 7
+    },
+    "numeros_na_resposta": [
+      "litros_total"
+    ]
   },
   {
     "id": "producao-rebanho-30-dias",
     "pergunta": "Quanto leite o rebanho produziu nos últimos 30 dias?",
     "semente": 42,
     "ferramenta_esperada": "producao_por_periodo",
-    "argumentos_esperados": {"dias": 30},
-    "valor_esperado": {"litros_total": 19639.6, "dias_com_registro": 30}
+    "argumentos_esperados": {
+      "dias": 30
+    },
+    "valor_esperado": {
+      "litros_total": 19639.6,
+      "dias_com_registro": 30
+    },
+    "numeros_na_resposta": [
+      "litros_total"
+    ]
+  },
+  {
+    "id": "producao-rebanho-um-dia",
+    "pergunta": "Quanto o rebanho produziu no dia 10 de novembro?",
+    "semente": 42,
+    "ferramenta_esperada": "producao_por_periodo",
+    "argumentos_esperados": {
+      "data_inicio": "2026-11-10",
+      "data_fim": "2026-11-10"
+    },
+    "valor_esperado": {
+      "litros_total": 638.8,
+      "litros_manha_total": 345.4,
+      "litros_tarde_total": 293.4,
+      "dias_com_registro": 1
+    },
+    "numeros_na_resposta": [
+      "litros_total"
+    ]
+  },
+  {
+    "id": "producao-rebanho-intervalo",
+    "pergunta": "Qual foi a produção do rebanho de 1 a 7 de novembro?",
+    "semente": 42,
+    "ferramenta_esperada": "producao_por_periodo",
+    "argumentos_esperados": {
+      "data_inicio": "2026-11-01",
+      "data_fim": "2026-11-07"
+    },
+    "valor_esperado": {
+      "litros_total": 4497.0,
+      "litros_manha_total": 2429.2,
+      "litros_tarde_total": 2067.8,
+      "dias_com_registro": 7
+    },
+    "numeros_na_resposta": [
+      "litros_total"
+    ]
   }
 ]
